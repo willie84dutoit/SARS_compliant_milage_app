@@ -23,6 +23,11 @@ _(none yet)_
 ### T-001 · Scaffold Android project (Kotlin, Compose, Room, Hilt)
 - **Owner:** android-engineer · **Phase:** MVP · **Blocked-by:** none
 - Set up Gradle, module layout (ui / domain / data / service), Hilt DI graph, Room base.
+- ⏭️ **NEXT TASK = Option A (design only, no code):** first produce the **architecture blueprint**
+  (module tree, Room entity/DAO signatures, Hilt graph, trip state machine, screen+VM list, build order)
+  via `android-engineer`. Actual scaffolding code comes AFTER, in a fresh full window. See
+  `team/SESSION_HANDOFF.md` → "THE NEXT TASK — Option A". (Option A also includes T-010 cost model and,
+  if budget allows, the T-008 signing debate.)
 
 ### T-002 · Vehicle detection (ActivityRecognition IN_VEHICLE + thresholds)
 - **Owner:** android-engineer + geo-sensors-specialist · **Phase:** MVP · **Blocked-by:** T-001

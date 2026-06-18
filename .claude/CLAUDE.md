@@ -52,11 +52,23 @@ rather than invent design.
   before committing — get opposing positions, then a cost-architect ruling, then decide.
 - **Anything that spends money or changes architecture must clear `cost-architect` first.**
 
-## Record-keeping (mandatory)
+## Record-keeping (mandatory — NON-NEGOTIABLE)
 After every meaningful action, update the tracking files in `team/`:
 - `LOGS.md` — append-only decision/event log (DECISION, DEBATE, DELEGATION, COST, BLOCKER, DONE, NOTE).
 - `TASKS.md` — the board; move tasks across states, never delete, completed → Done with date.
-- `SESSION_HANDOFF.md` — cold-start summary, appended each session via `/handoff`.
+- `SESSION_HANDOFF.md` — ~~cold-start summary, appended each session via `/handoff`~~
+  **narrative carry-over of the conversation** (see the rule below), appended each session via `/handoff`.
+
+### Session discipline (always, every session)
+1. **Keep TASKS current as you go.** Whenever a task starts, blocks, unblocks, or finishes — update
+   `team/TASKS.md` (and the `agile/board.md` card) in the same turn, not later. The board must never
+   silently drift from reality. `LOGS.md` gets the decision/event; `TASKS.md` gets the state.
+2. **Always write the handoff at the end of a session.** Run `/handoff` before the session ends.
+3. **The handoff is a DISCUSSION CARRY-OVER, not a status tracker.** It captures what we *talked about*
+   — the reasoning, the asides, the user's stated intent, half-finished threads, things that would be
+   lost if the chat disappeared. Status (where tasks stand) belongs in `TASKS.md`/`LOGS.md`; do not
+   reduce the handoff to a status snapshot. If a new session would lose *context or intent* without a
+   note, it goes in the handoff.
 
 ## Planning artefacts (`team/`)
 - `userstories/` — agile user stories grouped into epics (`US-###`), owned by the Manager.

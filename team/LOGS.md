@@ -86,3 +86,11 @@ TYPE is one of: DECISION, DEBATE, DELEGATION, COST, BLOCKER, DONE, NOTE.
 - **Rationale:** Isolates this app's cloud context from the user's other projects; prevents wrong-project deploys.
 - **Cost impact:** $0 — project creation is free; **billing intentionally NOT linked** (`billingEnabled:false`). Linking is gated by `cost-architect` and should follow T-010 (cost model). Do not reuse another app's billing account (e.g. LGG_Indoor_Stock).
 - **Follow-up:** Before any deploy: run T-010 cost model → choose/confirm billing account → `gcloud billing projects link mileage-tracker-716601 --billing-account=<ID>`. To switch gcloud back to other work: `gcloud config configurations activate <name>`.
+
+### [2026-06-18 15:30] DECISION — Session discipline rules + handoff redefined
+- **Actor:** manager (user request)
+- **Context:** User asked for a standing rule to always keep TASKS updated and always write the handoff at session end, and clarified the handoff is a *discussion carry-over*, not a status tracker.
+- **Action / Decision:** Added "Session discipline" rules to `.claude/CLAUDE.md`; redefined `SESSION_HANDOFF.md` header + `/handoff` skill to capture conversation/intent (not status). Wrote the Session 2 handoff for today.
+- **Rationale:** Status drifts if not updated live; the real loss between sessions is *context and intent*, which TASKS/LOGS don't capture.
+- **Cost impact:** n/a
+- **Follow-up:** Apply every session going forward.
