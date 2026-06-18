@@ -59,8 +59,8 @@ After every meaningful action, update the tracking files in `team/`:
 - `SESSION_HANDOFF.md` — cold-start summary, appended each session via `/handoff`.
 
 ## Planning artefacts (`team/`)
-- `team/user-stories/` — agile user stories grouped into epics (`US-###`), owned by the Manager.
-- `team/kanban/board.md` — the visual flow board; stories move across columns (WIP limit 3 In Progress).
+- `userstories/` — agile user stories grouped into epics (`US-###`), owned by the Manager.
+- `agile/board.md` — the visual flow board; stories move across columns (WIP limit 3 In Progress).
 - `team/TASKS.md` — engineering task breakdown (`T-###`) that delivers the stories.
 - `team/LOGS.md`, `team/SESSION_HANDOFF.md` — decision log and cold-start handoff.
 

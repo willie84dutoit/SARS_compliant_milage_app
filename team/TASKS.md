@@ -72,11 +72,16 @@ _(none yet)_
 - **Owner:** ios-engineer · **Phase:** Phase-3 · **Blocked-by:** stable MVP + backend contract
 - Mirror MVP behaviour; Sign in with Apple; HMS/Huawei flavor considerations tracked separately.
 
-### T-014 · Repo, Docker & CI setup (GitHub + .venv + Cloud Run image)
+### T-014 · Repo, Docker & CI setup (GitHub + .venv + Cloud Run image) — IN PROGRESS
 - **Owner:** devops-engineer · **Phase:** Cross-cutting · **Blocked-by:** none
 - Git repo + `.gitignore` (ignore `.venv/`, secrets, keystores, `google-services.json`, `serviceAccount*.json`),
   backend Dockerfile + docker-compose (with Firestore emulator), Python `.venv` workflow + pinned deps,
-  GitHub Actions CI (lint/test/build/container). Foundation: `.gitignore` + `git init` done 2026-06-18.
+  GitHub Actions CI (lint/test/build/container).
+- ✅ done 2026-06-18: `.gitignore` + `git init`; `backend/` (Flask placeholder, pinned `requirements.txt`,
+  multi-stage non-root Dockerfile, pytest, `ruff.toml`, README .venv workflow); root `docker-compose.yml`
+  (backend + Firestore emulator); `.github/workflows/ci.yml`. Validated locally: venv install OK, ruff clean, pytest 3/3.
+- ⏳ open: real `docker build` verification (Docker engine wasn't running locally — CI build-image job covers it);
+  create GitHub remote + first push.
 
 ---
 

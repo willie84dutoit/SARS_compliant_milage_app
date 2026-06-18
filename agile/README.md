@@ -1,11 +1,11 @@
 # Agile Kanban
 
-The visual flow board for user stories. **Stories** (`US-###`, see `../user-stories/`) move across
-columns here; the **engineering tasks** (`T-###`, see `../TASKS.md`) are what each story breaks into.
+The visual flow board for user stories. **Stories** (`US-###`, see `../userstories/`) move across
+columns here; the **engineering tasks** (`T-###`, see `../team/TASKS.md`) are what each story breaks into.
 
 - `board.md` — the live board (columns below).
 - The Manager updates the board during `/standup` and at `/handoff`; movements are also noted in
-  `../LOGS.md`.
+  `../team/LOGS.md`.
 
 ## Columns & WIP limits
 | Column | Meaning | WIP limit |

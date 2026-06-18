@@ -30,3 +30,19 @@ TYPE is one of: DECISION, DEBATE, DELEGATION, COST, BLOCKER, DONE, NOTE.
 - **Rationale:** Single point of contact; specialists debate and analyse; cost-architect gates spend.
 - **Cost impact:** n/a (tooling only)
 - **Follow-up:** see TASKS.md
+
+### [2026-06-18 13:45] NOTE — Planning folders moved to top level
+- **Actor:** manager
+- **Context:** User wanted the agile board and user stories as top-level folders.
+- **Action / Decision:** `git mv team/kanban → agile`, `git mv team/user-stories → userstories`; fixed all cross-references in CLAUDE.md, team/README.md, and the moved files.
+- **Rationale:** Match the user's expected layout; keep stories/board easy to find.
+- **Cost impact:** n/a
+- **Follow-up:** none
+
+### [2026-06-18 13:50] DELEGATION — T-014 DevOps foundation (Docker + .venv + CI)
+- **Actor:** manager → devops-engineer
+- **Context:** User asked to build the Docker/.venv foundation now, before backend code exists (US-106).
+- **Action / Decision:** Delegated; devops-engineer created `backend/` (placeholder Flask app, pinned requirements, multi-stage non-root Dockerfile, pytest, ruff config, README with .venv workflow), root `docker-compose.yml` (backend + Firestore emulator), and `.github/workflows/ci.yml` (lint+test, then image build).
+- **Rationale:** Reproducible, Cloud Run-ready repo from day one.
+- **Cost impact:** n/a now (local/CI files only). The actual Cloud Run **deploy** must clear cost-architect (see T-009/T-010).
+- **Follow-up:** T-014 — validated locally (venv install OK, ruff clean, pytest 3/3). Open: real `docker build` (Docker engine not running locally; CI build-image job will cover it) and GitHub remote + push.

@@ -37,8 +37,8 @@ sign-off, and keeps these records.
 - [LOGS.md](LOGS.md) — append-only decision/event log.
 - [TASKS.md](TASKS.md) — engineering task board (`T-###`).
 - [SESSION_HANDOFF.md](SESSION_HANDOFF.md) — cold-start session summaries.
-- [user-stories/](user-stories/) — agile stories grouped into epics (`US-###`).
-- [kanban/board.md](kanban/board.md) — visual flow board (WIP limit 3 In Progress).
+- [userstories/](../userstories/) — agile stories grouped into epics (`US-###`).
+- [agile/board.md](../agile/board.md) — visual flow board (WIP limit 3 In Progress).
 
 ## Source specs (project root)
 `automated_mileage_tracker_spec.md` · `developer_handoff_brief.md` · `post_mvp_api_plan.md` · `publisheing guide.md`

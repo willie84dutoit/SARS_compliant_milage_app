@@ -1,8 +1,8 @@
 # User Stories
 
 Agile user stories grouped into epics. Stories describe **user value**; the engineering tasks that
-deliver them live in `../TASKS.md` (linked by `T-###` ids), and movement is tracked on the board
-in `../kanban/board.md` (by `US-###` ids).
+deliver them live in `../team/TASKS.md` (linked by `T-###` ids), and movement is tracked on the board
+in `../agile/board.md` (by `US-###` ids).
 
 ## Story format
 ```

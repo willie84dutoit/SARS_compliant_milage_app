@@ -1,7 +1,7 @@
 # Kanban Board
 
 Last moved: 2026-06-18 · Maintained by the Manager. WIP limit on **In Progress** = 3.
-Story details in `../user-stories/`; task breakdown in `../TASKS.md`.
+Story details in `../userstories/`; task breakdown in `../team/TASKS.md`.
 
 ---
 
@@ -18,13 +18,13 @@ Story details in `../user-stories/`; task breakdown in `../TASKS.md`.
 - **US-103** Admin review/approval — _backend-engineer_ · T-011
 - **US-104** SARS-ready export — _analytics-specialist_ · T-011
 - **US-105** Third-party accounting API — _backend-engineer_ · T-009
-- **US-106** Docker + GitHub + .venv reproducibility — _devops-engineer_ · T-014
 
 ## 🟦 Ready
 _(empty — Manager promotes stories here once refined and unblocked)_
 
-## 🔧 In Progress  _(WIP 0/3)_
-_(empty)_
+## 🔧 In Progress  _(WIP 1/3)_
+- **US-106** Docker + GitHub + .venv reproducibility — _devops-engineer_ · T-014
+  · foundation built + validated locally; open: real docker build (CI) + GitHub push
 
 ## 🔍 In Review
 _(empty)_

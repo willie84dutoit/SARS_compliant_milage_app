@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: mileage-tracker-backend:local
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      FLASK_ENV: development
+      FIRESTORE_EMULATOR_HOST: firestore-emulator:8200
+      GOOGLE_CLOUD_PROJECT: mileage-tracker-local
+    depends_on:
+      - firestore-emulator
+    restart: unless-stopped
+
+  firestore-emulator:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    command: >
+      gcloud emulators firestore start
+      --host-port=0.0.0.0:8200
+    ports:
+      - "8200:8200"
+    restart: unless-stopped
