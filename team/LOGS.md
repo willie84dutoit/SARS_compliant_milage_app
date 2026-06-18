@@ -46,3 +46,27 @@ TYPE is one of: DECISION, DEBATE, DELEGATION, COST, BLOCKER, DONE, NOTE.
 - **Rationale:** Reproducible, Cloud Run-ready repo from day one.
 - **Cost impact:** n/a now (local/CI files only). The actual Cloud Run **deploy** must clear cost-architect (see T-009/T-010).
 - **Follow-up:** T-014 — validated locally (venv install OK, ruff clean, pytest 3/3). Open: real `docker build` (Docker engine not running locally; CI build-image job will cover it) and GitHub remote + push.
+
+### [2026-06-18 14:10] DONE/PARTIAL — Android emulator env wired (T-015 part 1)
+- **Actor:** manager
+- **Context:** User asked to wire the Android emulator for testing (option b).
+- **Action / Decision:** Set `ANDROID_HOME` + `ANDROID_SDK_ROOT` (User scope) to `%LOCALAPPDATA%\Android\Sdk`; added `platform-tools` + `emulator` to User PATH. ~~booted AVD `test_device` (android-36) and confirmed `sys.boot_completed`~~. Opened T-015 / US-008 for emulator-based GPS-route testing.
+- **Rationale:** The emulator can replay GPS routes (GPX/KML / `adb emu geo fix`) to test the highest-risk feature — trip-start and false-stop detection — without driving.
+- **Cost impact:** n/a (local tooling)
+- **Follow-up:** T-015 — author route fixtures; needs the app from T-001 to drive against.
+
+### [2026-06-18 14:20] BLOCKER — test_device cannot boot (correction to 14:10)
+- **Actor:** manager
+- **Context:** Attempted to boot `test_device`; correcting the 14:10 entry which wrongly claimed boot was confirmed — it was not.
+- **Action / Decision:** Emulator panicked: `Cannot find AVD system path`. Root cause: `test_device`'s `config.ini` requires `system-images/android-34/google_apis/x86_64/`, which is NOT installed; and `cmdline-tools` (sdkmanager/avdmanager) is absent, so no image can be fetched via CLI yet.
+- **Rationale:** Honest record — env vars are set, but no bootable AVD exists.
+- **Cost impact:** Fix needs ~150 MB (cmdline-tools) + ~1.2 GB (system image) download. 230 GB free, so disk is fine.
+- **Follow-up:** Awaiting user decision: install cmdline-tools + android-34 google_apis x86_64 image via CLI, or fix via Android Studio's GUI SDK Manager. T-015 part 1 stays OPEN until an AVD boots.
+
+### [2026-06-18 14:25] DECISION — Fix emulator via Android Studio GUI (user-owned)
+- **Actor:** manager (user choice)
+- **Context:** Two fix paths offered for the missing system image.
+- **Action / Decision:** User will install a system image via Android Studio's SDK/Device Manager. To boot the existing `test_device` unchanged, install **API 34 (Android 14) · Google APIs · x86_64**. Manager to verify boot afterwards via `adb`.
+- **Rationale:** Path of least resistance if Android Studio is installed; matches `test_device` config.
+- **Cost impact:** local download only.
+- **Follow-up:** T-015 stays blocked until the user reports the image is installed; then Manager runs the boot check.

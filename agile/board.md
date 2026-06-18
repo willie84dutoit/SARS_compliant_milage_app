@@ -22,9 +22,11 @@ Story details in `../userstories/`; task breakdown in `../team/TASKS.md`.
 ## 🟦 Ready
 _(empty — Manager promotes stories here once refined and unblocked)_
 
-## 🔧 In Progress  _(WIP 1/3)_
+## 🔧 In Progress  _(WIP 2/3)_
 - **US-106** Docker + GitHub + .venv reproducibility — _devops-engineer_ · T-014
   · foundation built + validated locally; open: real docker build (CI) + GitHub push
+- **US-008** Emulator GPS-route testing — _compliance-qa-specialist + geo-sensors-specialist_ · T-015
+  · ANDROID_HOME/PATH set; ⛔ blocked: test_device can't boot (system image not installed, no cmdline-tools)
 
 ## 🔍 In Review
 _(empty)_

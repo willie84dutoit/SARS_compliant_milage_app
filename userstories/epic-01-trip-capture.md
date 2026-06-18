@@ -89,3 +89,16 @@ them for claims.
 - [ ] Given my trusted device connects, when ignition turns on, then a trip starts; when Bluetooth is unavailable, then the standard automatic path still works.
 
 **Owner agent:** geo-sensors-specialist (+ android-engineer)  ·  **Tasks:** T-002  ·  **Status:** Backlog
+
+---
+
+### US-008 · Test detection on emulated GPS routes   [Cross-cutting] [3]
+**As a** developer **I want** to replay GPS routes through the Android emulator **so that** I can
+verify trip-start, distance, and false-stop logic without physically driving.
+
+**Acceptance criteria**
+- [ ] Given the emulator is running, when I replay a normal-trip route, then a trip starts, accumulates distance, and ends after the 3-min stop rule.
+- [ ] Given a stop-start-traffic route (brief §10 #2), when replayed, then brief pauses do NOT falsely end the trip.
+- [ ] Given route fixtures, when stored in the repo, then they are repeatable in CI/local runs.
+
+**Owner agent:** compliance-qa-specialist (+ geo-sensors-specialist)  ·  **Tasks:** T-015  ·  **Status:** In progress — env wired; blocked on installing a bootable system image (no cmdline-tools / no system image yet)

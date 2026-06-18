@@ -83,6 +83,19 @@ _(none yet)_
 - ⏳ open: real `docker build` verification (Docker engine wasn't running locally — CI build-image job covers it);
   create GitHub remote + first push.
 
+### T-015 · Emulator-based GPS-route test harness (Android) — IN PROGRESS
+- **Owner:** compliance-qa-specialist + geo-sensors-specialist · **Phase:** Cross-cutting · **Blocked-by:** T-001 (for app under test)
+- Use the Android emulator to test trip detection without driving: replay GPS routes (GPX/KML or
+  scripted `adb emu geo fix` coordinate streams) to exercise trip-start, distance accumulation, and
+  the false-stop logic (traffic-light pause vs. real 3-min stop). Define repeatable route fixtures.
+- ✅ done 2026-06-18: `ANDROID_HOME`/`ANDROID_SDK_ROOT` set (User scope); `adb`+`emulator` on PATH.
+- ⛔ blocked 2026-06-18: AVD `test_device` cannot boot — its config requires
+  `system-images/android-34/google_apis/x86_64/` which is NOT installed, and `cmdline-tools`
+  (sdkmanager/avdmanager) is absent. Need to install cmdline-tools + a system image (or use
+  Android Studio's GUI SDK Manager) before any AVD will boot.
+- ⏳ open: author route fixtures (normal trip, stop-start traffic, park-and-stop); wire into
+  `compliance-qa-specialist` test scenarios (brief §10 #1, #2); needs the app from T-001 to drive against.
+
 ---
 
 ## Done
