@@ -70,3 +70,11 @@ TYPE is one of: DECISION, DEBATE, DELEGATION, COST, BLOCKER, DONE, NOTE.
 - **Rationale:** Path of least resistance if Android Studio is installed; matches `test_device` config.
 - **Cost impact:** local download only.
 - **Follow-up:** T-015 stays blocked until the user reports the image is installed; then Manager runs the boot check.
+
+### [2026-06-18 14:45] DONE — Emulator boot confirmed; blocker resolved (T-015 part 1)
+- **Actor:** manager
+- **Context:** Other Claude confirmed the working SDK is `C:\Android\Sdk` (Android Studio at `C:\Android Studio`). The 14:20 blocker was a wrong SDK path, not a missing image.
+- **Action / Decision:** Re-pointed `ANDROID_HOME`/`ANDROID_SDK_ROOT` (User scope) from the empty `%LOCALAPPDATA%\Android\Sdk` to `C:\Android\Sdk`; fixed PATH. Booted `test_device`: **boot_completed in ~35s, Android 14 (API 34), `emulator-5554`**. Verified `adb emu geo fix` returns OK (GPS route injection works).
+- **Rationale:** Real, working location-injection path for testing trip-start / false-stop detection without driving.
+- **Cost impact:** n/a (used the already-installed SDK).
+- **Follow-up:** T-015 part 1 complete. Open: route fixtures + the app from T-001. NOTE: SDK path/AVD name are machine-specific (brittle across machines) — revisit if portability matters.

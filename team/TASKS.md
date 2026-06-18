@@ -88,11 +88,10 @@ _(none yet)_
 - Use the Android emulator to test trip detection without driving: replay GPS routes (GPX/KML or
   scripted `adb emu geo fix` coordinate streams) to exercise trip-start, distance accumulation, and
   the false-stop logic (traffic-light pause vs. real 3-min stop). Define repeatable route fixtures.
-- ✅ done 2026-06-18: `ANDROID_HOME`/`ANDROID_SDK_ROOT` set (User scope); `adb`+`emulator` on PATH.
-- ⛔ blocked 2026-06-18: AVD `test_device` cannot boot — its config requires
-  `system-images/android-34/google_apis/x86_64/` which is NOT installed, and `cmdline-tools`
-  (sdkmanager/avdmanager) is absent. Need to install cmdline-tools + a system image (or use
-  Android Studio's GUI SDK Manager) before any AVD will boot.
+- ✅ done 2026-06-18: `ANDROID_HOME`/`ANDROID_SDK_ROOT` set to `C:\Android\Sdk` (User scope); `adb`+`emulator` on PATH.
+- ✅ done 2026-06-18: `test_device` boots — Android 14 (API 34), `emulator-5554`, ~35s; `adb emu geo fix` GPS injection verified OK.
+  <!-- earlier "blocked" note: wrong SDK path (%LOCALAPPDATA%\Android\Sdk was empty); real SDK is C:\Android\Sdk -->
+  ~~⛔ blocked: AVD cannot boot — system image not installed / no cmdline-tools~~ (resolved: it was a wrong SDK path, not a missing image).
 - ⏳ open: author route fixtures (normal trip, stop-start traffic, park-and-stop); wire into
   `compliance-qa-specialist` test scenarios (brief §10 #1, #2); needs the app from T-001 to drive against.
 

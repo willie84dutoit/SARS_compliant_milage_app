@@ -101,4 +101,4 @@ verify trip-start, distance, and false-stop logic without physically driving.
 - [ ] Given a stop-start-traffic route (brief §10 #2), when replayed, then brief pauses do NOT falsely end the trip.
 - [ ] Given route fixtures, when stored in the repo, then they are repeatable in CI/local runs.
 
-**Owner agent:** compliance-qa-specialist (+ geo-sensors-specialist)  ·  **Tasks:** T-015  ·  **Status:** In progress — env wired; blocked on installing a bootable system image (no cmdline-tools / no system image yet)
+**Owner agent:** compliance-qa-specialist (+ geo-sensors-specialist)  ·  **Tasks:** T-015  ·  **Status:** In progress — emulator working (C:\Android\Sdk, test_device boots, GPS injection verified); pending route fixtures + the app from T-001

@@ -26,7 +26,7 @@ _(empty — Manager promotes stories here once refined and unblocked)_
 - **US-106** Docker + GitHub + .venv reproducibility — _devops-engineer_ · T-014
   · foundation built + validated locally; open: real docker build (CI) + GitHub push
 - **US-008** Emulator GPS-route testing — _compliance-qa-specialist + geo-sensors-specialist_ · T-015
-  · ANDROID_HOME/PATH set; ⛔ blocked: test_device can't boot (system image not installed, no cmdline-tools)
+  · ✅ emulator works (C:\Android\Sdk, test_device boots, GPS injection OK); open: route fixtures + app from T-001
 
 ## 🔍 In Review
 _(empty)_
