@@ -1,0 +1,45 @@
+# ── Python ──────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# ── Secrets / credentials (NEVER commit) ────────────────
+.env
+.env.*
+*.key
+*.pem
+serviceAccount*.json
+google-services.json
+GoogleService-Info.plist
+*.keystore
+*.jks
+
+# ── Android ─────────────────────────────────────────────
+*.iml
+.gradle/
+local.properties
+/build/
+**/build/
+.cxx/
+captures/
+
+# ── iOS / Xcode ─────────────────────────────────────────
+xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+
+# ── Docker / Cloud ──────────────────────────────────────
+*.local
+
+# ── IDE / OS ────────────────────────────────────────────
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ── Claude Code: keep agents/skills/memory, ignore local overrides ──
+.claude/settings.local.json
