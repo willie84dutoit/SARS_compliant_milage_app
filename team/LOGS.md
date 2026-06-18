@@ -78,3 +78,11 @@ TYPE is one of: DECISION, DEBATE, DELEGATION, COST, BLOCKER, DONE, NOTE.
 - **Rationale:** Real, working location-injection path for testing trip-start / false-stop detection without driving.
 - **Cost impact:** n/a (used the already-installed SDK).
 - **Follow-up:** T-015 part 1 complete. Open: route fixtures + the app from T-001. NOTE: SDK path/AVD name are machine-specific (brittle across machines) — revisit if portability matters.
+
+### [2026-06-18 15:10] DECISION — Dedicated GCP project + isolated gcloud config; billing deferred
+- **Actor:** manager (user-approved)
+- **Context:** User wanted to avoid deploying to the wrong project (`indoorstockcontrol-498411` belonged to another app).
+- **Action / Decision:** Created GCP project **`mileage-tracker-716601`** (display "Mileage Tracker"); created and activated isolated gcloud configuration **`milage-app`** (account willie84dutoit@gmail.com, project mileage-tracker-716601). Note: underscores invalid in project IDs / config names, so config is `milage-app` not `milage_app`.
+- **Rationale:** Isolates this app's cloud context from the user's other projects; prevents wrong-project deploys.
+- **Cost impact:** $0 — project creation is free; **billing intentionally NOT linked** (`billingEnabled:false`). Linking is gated by `cost-architect` and should follow T-010 (cost model). Do not reuse another app's billing account (e.g. LGG_Indoor_Stock).
+- **Follow-up:** Before any deploy: run T-010 cost model → choose/confirm billing account → `gcloud billing projects link mileage-tracker-716601 --billing-account=<ID>`. To switch gcloud back to other work: `gcloud config configurations activate <name>`.

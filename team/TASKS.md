@@ -59,6 +59,8 @@ _(none yet)_
 ### T-010 · Cost model for backend (Cloud Run / Firestore / Storage / ML)
 - **Owner:** cost-architect · **Phase:** Phase-2 · **Blocked-by:** none
 - Per-user/month cost projection at 20, 1k, 10k users; recommend free-tier-safe defaults.
+- GCP project exists: `mileage-tracker-716601` (gcloud config `milage-app`), billing NOT linked.
+  This cost model gates the billing-link decision — do it before enabling spend.
 
 ### T-011 · Analytics events + SARS-ready reporting
 - **Owner:** analytics-specialist · **Phase:** Phase-2 · **Blocked-by:** T-009
