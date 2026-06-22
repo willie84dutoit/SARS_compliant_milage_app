@@ -332,3 +332,107 @@ run the test suite, and start working T-002 onward for real, using
 - New artifacts this session: `team/blueprints/FULL_IMPLEMENTATION_PLAN.md` (the build guide, now in
   its corrected spec+Verify form, including T-017), `userstories/epic-03-platforms-publishing.md`
   (US-201–US-204), US-107 added to epic-02, T-016/T-017 added to `TASKS.md`.
+
+---
+
+## Session 2026-06-22 (part 5) — Verified the foundation, hardened it for field testing, first real Haiku-coder run, then shipped it to a public repo
+
+### The through-line of the conversation
+This session turned the corner from *planning* to *verified, committed product*. We opened by closing
+the two forks the part-4 handoff left hanging, then did the verification pass that part-4 said was the
+real next step — which immediately paid off by catching a cracked foundation (the service bypassing the
+tested state machine) before any features were built on it. The back half became a real-world git
+hygiene exercise: committing the whole MVP scaffold to a brand-new **public** GitHub repo, with the
+user rapidly course-correcting the remote URL, the commit identity, and `.gitignore` as we went. The
+single most important new fact for every future session: **there is now a hard deadline — a working
+MVP (personal sideloaded APK) by Friday afternoon, framed as "the next ~10 sessions."** Pace
+accordingly (~1 real task/session); that's why we deliberately spent this session hardening the
+foundation rather than racing into features on top of a flaw.
+
+### What we discussed and decided (the carry-over, not just status)
+- **The two part-4 forks are now CLOSED, both in favour of keeping scope wide:** the user chose to
+  **NOT park** T-009/T-011/T-012/T-013/T-016 (the multi-platform/published-product roadmap stays
+  active on the board even though the immediate target is a personal APK) and to **keep T-008**
+  (signing) in the MVP as cheap tax-defensibility insurance. So the "should we park these?" thread
+  that's been carried since part-4 should not be re-raised — it's settled.
+- **New, load-bearing intent — field testing drives the quality bar.** The user said the app will go
+  to human field testers, and an emulator test isn't the final decider — a real field test is. From
+  that they asked, unprompted, for **proper logging + try/catch error handling** so that when a tester
+  hits a problem in the wild, they can hand back a log file and the Manager can diagnose it. This is
+  *why* T-018 exists. The mental model to preserve: a failure in the field must produce a greppable
+  log line, never a silent death. Tags are `MT-*` (MT-Service, MT-Location, MT-OCR, MT-Export,
+  MT-Repository, MT-ActivityRecognition).
+- **The verification pass was the high-value move of the session.** It confirmed the scaffold was
+  real (tests pass, T-008 columns present, blueprint-conformant) but caught two foundation cracks:
+  the foreground service hand-rolled its own trip logic and **never called the unit-tested
+  `TripLifecycleStateMachine`** (so the tested rulebook was dead code and an untested copy was what
+  would actually run on testers' phones), and a missing `ServiceModule`. We explained the state
+  machine to the user in plain terms ("the rulebook for a trip's life") — they're non-technical enough
+  to want that, and responded well to it. Both were fixed by wiring the service *to* the tested API
+  rather than changing tested code.
+- **The Haiku coder question got a real, evidence-based answer.** The user asked whether the Haiku
+  coders are the right choice / how they're performing / whether to delete+recreate them. Honest
+  finding: **they had never been used — not once** (all prior work was specialist design/judgment).
+  So instead of speculating, we used the T-018 mechanical grind as the first real test:
+  android-engineer designed + did the judgment parts, **android-coder (Haiku) did the grind**,
+  android-engineer reviewed. Verdict: **keep them.** The coder replicated a 5-part reference pattern
+  across 4 files with no drift and got the tricky bits right; its one defect (main-thread blocking
+  I/O) was *inherited from the reference implementation it was told to copy* (the pre-existing
+  `CsvFileWriter`/`ExportViewModel`), not a coder failure — and the design→implement→review gate
+  caught it. That bug became **T-019** and was fixed (two `withContext(Dispatchers.IO)` wraps). The
+  lesson the user should remember: the tiered model works *because* of the review gate, not despite it.
+- **The commit/push was a fast, multi-correction sequence — worth remembering the user's working
+  style here.** They created the remote themselves mid-session, corrected the repo URL twice
+  (`milage_sars_app` → **`SARS_compliant_milage_app`**), told us to update `.gitignore` before
+  pushing, and when GitHub's GH007 blocked the push for exposing their real gmail, said "commit with
+  an alias." We set the **repo-local** `user.email` to `willie84dutoit@users.noreply.github.com`
+  (global config left untouched), amended/re-authored, folded the `.gitignore` hardening into the
+  same commit, and pushed successfully. They move fast and expect inline correction, not a stall.
+- **The email-in-history decision is the one thing a future session might be tempted to "fix" — DON'T,
+  unless asked.** The 6 commits from earlier sessions still carry `<redacted-personal-email>` (the real gmail) and are
+  now in the **public** repo's history (GH007 only enforced on the tip, so the amend let the old ones
+  through). We offered a history-rewrite + force-push to scrub it; the user **explicitly chose to
+  leave it as-is** (the gmail is guessable from the `willie84dutoit` username anyway). Future commits
+  are clean via the repo-local alias. Do not re-raise this or rewrite history on your own initiative.
+- **"Remember we are using docker" — interpreted and noted.** This was a reminder of the project's
+  containerised backend convention. For this session it had no direct action: the Android commit
+  doesn't touch the backend Docker/CI. But it surfaced a genuine gap worth flagging (below): the
+  existing GitHub Actions CI is **backend-only** — pushing the Android app neither breaks it nor
+  builds/tests the Android app.
+
+### Open threads to pick up
+- **Android is not in CI.** `.github/workflows/ci.yml` lints/tests the Python backend and builds its
+  Docker image; it does nothing for the Android app. Pushing the app didn't break CI, but there's no
+  automated `./gradlew test`/`assembleDebug` on push. Decide next session: add an Android CI job, or
+  consciously defer it (given the goal is a locally-built sideloaded APK, deferring is defensible).
+- **The deferred `MT-ActivityRecognition` log line** (US-009's last, unchecked acceptance criterion)
+  rides with **T-002** — the registration `Task` doesn't exist yet to attach a failure listener to.
+  Fold it in when T-002 builds the real ActivityRecognition registration.
+- **Manager model:** the part-2/3 cost recommendation was to run the Manager on Sonnet day-to-day and
+  reserve Opus for big debate/architecture sessions. This session ran on **Opus** — arguably justified
+  by the verification/privacy/git judgment work, but worth a conscious choice next session rather than
+  drifting onto the expensive model by default.
+
+### The agreed next request / next step
+The user explicitly said **"we can start t002 in a new session."** So this session ends here, clean.
+The next session's job is **T-002 — automatic vehicle detection** (ActivityRecognition IN_VEHICLE, the
+70%-confidence acquisition window via a short parallel `requestActivityUpdates()` subscription, 30s
+silent retry, foreground-service lifecycle), following `team/blueprints/FULL_IMPLEMENTATION_PLAN.md`'s
+`T-002.x` steps, and finishing the deferred `MT-ActivityRecognition` logging while there. T-001 is now
+fully Done (verified → fixed → committed → pushed). Suggested opening request:
+> "Start T-002 — vehicle detection, per the FULL_IMPLEMENTATION_PLAN steps. TDD where it makes sense,
+> and wire in the deferred MT-ActivityRecognition logging."
+
+### Practical environment notes for next session
+- **Repo is now live and PUBLIC:** `https://github.com/willie84dutoit/SARS_compliant_milage_app.git`,
+  local `main` tracks `origin/main`. Foundation commit is `c846b05`.
+- **Git identity for this repo:** repo-local `user.email = willie84dutoit@users.noreply.github.com`
+  (alias), `user.name = willie84dutoit`. Global config is unchanged (still the gmail) — so this alias
+  applies *only* in this repo. Keep committing with the alias; GH007 will reject any commit that uses
+  the gmail.
+- **Commits need explicit verbal go-ahead every time** (unchanged standing rule) — a permission-dialog
+  approval is not authorization. The user gave it for this session's push.
+- Android: `ANDROID_HOME = C:\Android\Sdk`; emulator `test_device` (API 34) boots; `adb emu geo fix`
+  works for GPS route injection (relevant to T-002 testing without driving).
+- `./gradlew test` runs green (JBR JDK 21). Build toolchain is confirmed working — no build-loop risk.
+- gcloud config / GCP project unchanged; billing still not linked (no backend work this session).

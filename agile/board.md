@@ -146,8 +146,8 @@ _(empty — Manager promotes a card here once it's unblocked and fully scoped)_
 - [x] `./gradlew test` actually run and passing (2026-06-22 re-verified: all 5 unit-test classes pass, debug + release; 2026-06-19: `assembleDebug` BUILD SUCCESSFUL via JBR JDK 21; APK installed + launched on emulator-5554, no crash)
 - [x] ⚠️ HIGH blocker FIXED 2026-06-22 — service now driven by `TripLifecycleStateMachine` (start-side transient-phase resolution + stop-side `TripStatus`); state machine is no longer dead code; all tests still green
 - [x] ⚠️ MEDIUM blocker FIXED 2026-06-22 — `service/di/ServiceModule.kt` created per blueprint §3
-- [ ] Committed to git (currently untracked — user commits, not the Manager)
-- _Engineering complete; only the user's git commit remains before this card moves to Done._
+- [x] Committed to git + pushed to public remote (commit `c846b05`, 2026-06-22, `origin/main`)
+- _✅ T-001 fully DONE 2026-06-22 — verified, fixed, committed, pushed._
 
 ### T-014 · Repo, Docker & CI setup — US-106
 **Owner role:** _devops-engineer_ · Blocked-by: none

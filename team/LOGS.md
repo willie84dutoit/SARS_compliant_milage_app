@@ -534,6 +534,37 @@ TYPE is one of: DECISION, DEBATE, DELEGATION, COST, BLOCKER, DONE, NOTE.
   (mechanical, android-coder-appropriate). (2) T-018's remaining `MT-ActivityRecognition` logging rides
   with T-002. (3) T-001 → Done once the user commits.
 
+### [2026-06-22 12:30] DONE/DECISION — Foundation committed + pushed to public GitHub; email-in-history decision
+- **Actor:** manager (user gave explicit verbal go-ahead to "commit and push")
+- **Context:** End-of-session push of the verified foundation (T-001 + T-018 + T-019) to a new public
+  GitHub repo for the portfolio.
+- **Action / Decision:**
+  - Ran the mandatory pre-push leak scan: no credential files committable (only `local.properties`
+    on disk, correctly git-ignored); no emails/API keys/private keys in any file content; no secrets
+    in config. `.gitignore` strengthened with Android build-artifact coverage (`.kotlin/`, `*.apk`,
+    `*.aab`, `*.ap_`, `*.dex`, `*.hprof`, `release/`) per user request before pushing.
+  - Added requirement id **US-009** (field debuggability) to `userstories/epic-01-trip-capture.md`,
+    linking T-018 + T-019 to a story per the project pattern.
+  - Committed the full Android MVP scaffold + foundation hardening + planning docs + LICENSE
+    (commit `c846b05`, 99 files). No Co-Authored-By line (global no-attribution setting honored).
+  - **Remote:** user first gave `milage_sars_app.git`, then corrected to
+    `github.com/willie84dutoit/SARS_compliant_milage_app.git` (no remote had been added yet, so no undo
+    needed). Push initially **rejected by GitHub GH007** — the commit carried the real gmail. Fixed by
+    setting repo-LOCAL `user.email` to the alias `willie84dutoit@users.noreply.github.com` (global
+    config untouched) and re-authoring via `--amend --reset-author`. Push then succeeded; `main`
+    tracks `origin/main`.
+  - **Email-in-history decision (user choice):** the 6 pre-existing commits from earlier sessions
+    (`d9116b6`…`498204c`) carry `<redacted-personal-email>` (the user's real gmail) as author+committer and are now in the
+    PUBLIC repo history. GH007 only enforced on the tip commit, so the amend let them through. Offered
+    a history-rewrite + force-push to scrub the gmail from all commits; **user chose to LEAVE IT AS-IS**
+    (the gmail is already guessable from the `willie84dutoit` username). No history rewrite performed.
+- **Rationale:** User's explicit decision; future commits are clean via the repo-local alias config,
+  so no new exposure. The historical exposure is accepted PII per the user's own call.
+- **Cost impact:** n/a (GitHub free public repo).
+- **Follow-up:** None required. If the user ever changes their mind, the scrub is a `git filter-repo`
+  email-map + force-push (safe while the repo has no other collaborators). T-001 now fully Done
+  (committed). Next session: T-002.
+
 ### [2026-06-19 12:20] NOTE — Board regenerated to match FULL_IMPLEMENTATION_PLAN.md's micro-step granularity
 - **Actor:** manager (user request: "fix it according to the plan — do not forget to add the
   roleplayer-- or dont delete the roleplayer")
