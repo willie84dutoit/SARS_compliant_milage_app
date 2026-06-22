@@ -102,3 +102,19 @@ verify trip-start, distance, and false-stop logic without physically driving.
 - [ ] Given route fixtures, when stored in the repo, then they are repeatable in CI/local runs.
 
 **Owner agent:** compliance-qa-specialist (+ geo-sensors-specialist)  ·  **Tasks:** T-015  ·  **Status:** In progress — emulator working (C:\Android\Sdk, test_device boots, GPS injection verified); pending route fixtures + the app from T-001
+
+---
+
+### US-009 · Diagnose field-test failures from device logs   [Cross-cutting] [2]
+**As a** developer **I want** the app to capture structured, exportable on-device logs and handle
+errors gracefully **so that** I can diagnose failures from real-world field tests without physical
+access to the tester's device.
+
+**Acceptance criteria**
+- [x] Given an error occurs at any I/O boundary (foreground service, location, OCR, CSV export, Room), when it is hit, then it is caught and logged (greppable `MT-*` tag) instead of crashing or silently failing.
+- [x] Given a tester wants to report an issue, when they tap "Export debug log" in Settings, then the rotating on-device log is written to Downloads as a shareable text file.
+- [x] Given OCR fails, when it errors, then the trip still saves (never trapped in `pending_ocr`).
+- [x] Given file/MediaStore I/O runs, when an export executes, then it runs off the main thread (no UI freeze/ANR).
+- [ ] _(rides with T-002)_ Given the ActivityRecognition registration call exists, when it fails, then the failure is logged under `MT-ActivityRecognition`.
+
+**Owner agent:** android-engineer (+ android-coder)  ·  **Tasks:** T-018, T-019  ·  **Status:** Done 2026-06-22 (except the ActivityRecognition log line, which rides with T-002)

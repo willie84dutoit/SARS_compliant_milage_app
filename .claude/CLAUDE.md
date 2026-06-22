@@ -96,6 +96,30 @@ After every meaningful action, update the tracking files in `team/`:
 - **Never `replace_all`** for substitutions; targeted edits only.
 - **Read logs before debugging** — logs/test output first, then root cause, then fix.
 - **Never suppress command errors** — no `2>$null`, `|| true`, silent `catch`. Let failures show.
+- **Pre-push leak check (mandatory, every `git push`):** before any push to a remote (GitHub or
+  otherwise), scan the outgoing diff/history for secrets before letting it leave the machine:
+  - No personal or work email addresses hardcoded in source, config, or scripts (env vars referencing
+    them are fine; literal addresses are not).
+  - No API keys, tokens, passwords, or other secret strings.
+  - No `serviceAccount*.json` / GCP service-account keys, keystores, `google-services.json`, or any
+    credential file — confirm `.gitignore` actually excludes them AND that none were already staged
+    or committed before the ignore rule existed.
+  - If anything is found: stop, do not push, remove/rotate the secret, and if it was already committed
+    treat it as exposed (rotate it — rewriting history alone is not sufficient once pushed).
+  - This check runs in addition to, not instead of, the `.gitignore` entries in the DevOps conventions
+    above — the ignore file prevents new leaks; this check catches anything that slipped in already.
+- **Explicit verbal go-ahead required for every `git commit` and `git push` (NON-NEGOTIABLE):**
+  clicking "approve" on a tool-permission prompt is NOT sufficient authorization to commit or push.
+  Before running either command, the Manager must say in words what it's about to commit/push and
+  to where, and wait for the user to actually say so (e.g. "yes, push", "go ahead", "commit that") —
+  a bare permission-dialog approval does not count as that go-ahead. This applies every time, not
+  just the first time; prior approval for one commit/push does not authorize the next one.
+- **One agent/skill/tool call at a time (NON-NEGOTIABLE) — overrides the default parallel-tool-call
+  behavior for this project:** do not batch multiple Agent/Skill/Bash/Edit/etc. calls into the same
+  turn. If a situation genuinely calls for more than one running at once (e.g. independent
+  specialists that don't touch the same files), the Manager must first ask the user with a stated
+  motivation for why parallel execution is needed and wait for explicit approval before doing it —
+  never batch by default.
 
 ## Fixed v1 facts (don't re-derive — they're locked in the brief)
 - Start confidence 70% · stop inactivity 3 min · unstable-signal 2 min · prompt timeout 30 s · GPS distance filter 10 m.

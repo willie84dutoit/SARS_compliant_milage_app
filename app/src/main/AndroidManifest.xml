@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Brief §8 permission matrix: location (foreground + background), camera, notifications. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Required to run TripTrackingForegroundService (brief §8: persistent notification while
+         tracking) and to declare its foreground-service type per Android 14 requirements. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+    <!-- ActivityRecognition transition API (IN_VEHICLE detection, brief §5.1). -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
+    <!-- Re-register ActivityRecognition + resume an in-progress trip after device reboot
+         (T-001 §2 recovery mechanism relies on this firing before a new trip can start). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Optional Bluetooth vehicle-trigger setting (brief §5.1, off by default; out of scope
+         for T-001 scaffolding but declared now so the permission flow doesn't need a manifest
+         change later). -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
+    <application
+        android:name=".MileageTrackerApplication"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MileageTracker">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.MileageTracker">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Service layer: the one foreground service per T-001 §1 package tree.
+             Type "location" matches FOREGROUND_SERVICE_LOCATION above; ActivityRecognition
+             callbacks and notification triggers are driven from inside this service. -->
+        <service
+            android:name=".service.TripTrackingForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
+        <!-- ActivityRecognition transition PendingIntent target (T-001 §3: ActivityTransitionReceiver
+             injected via Hilt, registered/unregistered by ActivityRecognitionRegistrar). -->
+        <receiver
+            android:name=".service.activityrecognition.ActivityTransitionReceiver"
+            android:exported="false" />
+
+    </application>
+
+</manifest>

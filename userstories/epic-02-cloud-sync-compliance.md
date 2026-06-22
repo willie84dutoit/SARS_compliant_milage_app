@@ -76,3 +76,16 @@ defensible in a SARS audit.
 - [ ] Given a push, when CI runs, then lint + tests + container build all execute and fail loudly on error.
 
 **Owner agent:** devops-engineer  ·  **Tasks:** T-014  ·  **Status:** Backlog
+
+---
+
+### US-107 · Delete my account and all my data   [Phase-2] [3]
+**As a** driver **I want** to delete my account and all associated data **so that** I control my
+personal information and the app meets store privacy requirements.
+
+**Acceptance criteria**
+- [ ] Given I am signed in, when I request account deletion in-app, then I do not need to email support or use a web form to start it.
+- [ ] Given deletion is confirmed, when it completes, then my Firestore trips, profile, and any stored odometer photos in GCP Storage are removed, not just my auth record.
+- [ ] Given deletion is in progress, when it is requested twice, then it is idempotent (no error, no partial state).
+
+**Owner agent:** backend-engineer (+ security-crypto-specialist)  ·  **Tasks:** T-009  ·  **Status:** Backlog

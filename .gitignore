@@ -21,11 +21,20 @@ GoogleService-Info.plist
 # ── Android ─────────────────────────────────────────────
 *.iml
 .gradle/
+.kotlin/
 local.properties
 /build/
 **/build/
 .cxx/
 captures/
+# build artifacts (belt-and-braces alongside the build/ dirs above)
+*.apk
+*.aab
+*.ap_
+*.dex
+*.hprof
+output.json
+release/
 
 # ── iOS / Xcode ─────────────────────────────────────────
 xcuserdata/

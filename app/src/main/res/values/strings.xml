@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mileage Tracker</string>
+    <string name="notification_channel_trip_alerts_name">Trip alerts</string>
+    <string name="notification_channel_trip_alerts_description">Classify a detected trip as Work or Private</string>
+</resources>

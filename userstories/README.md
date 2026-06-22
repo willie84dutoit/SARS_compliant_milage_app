@@ -25,5 +25,6 @@ in `../agile/board.md` (by `US-###` ids).
 ## Epics
 - `epic-01-trip-capture.md` — detection, classification, odometer, save, export (MVP).
 - `epic-02-cloud-sync-compliance.md` — sync, signing, web review, SARS export, API (Phase-2+).
+- `epic-03-platforms-publishing.md` — iOS port, Huawei HMS adaptation, store publishing (Phase-3/4+).
 
 > No-delete rule applies: supersede stories with strikethrough or HTML comments; never remove them.
