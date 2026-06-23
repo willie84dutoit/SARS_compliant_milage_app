@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 /**
@@ -57,7 +58,9 @@ class OdometerCaptureViewModel @Inject constructor(
      */
     fun onConfirmManualOdometer(onConfirmed: () -> Unit) {
         val manualValueKm = _uiState.value.manualEntryText.toDoubleOrNull() ?: return
+        Timber.tag("MT-UI").i("OdometerCaptureScreen: manual odometer confirmed tripId=%s, valueKm=%s", tripId, manualValueKm)
         viewModelScope.launch {
+            Timber.tag("MT-Trip").i("OdometerCaptureScreen: writing verifiedOdometerKm=%s for tripId=%s (manual entry)", manualValueKm, tripId)
             tripRepository.updateVerifiedOdometer(tripId, manualValueKm)
             resolvePendingOcrForTrip()
             onConfirmed()
@@ -70,7 +73,9 @@ class OdometerCaptureViewModel @Inject constructor(
      * per [TripPhotoRepository.savePhotoIfRetentionEnabled]'s documented retention rule.
      */
     fun onConfirmOcrResult(valueKm: Double, imageUri: String, photoRetention: PhotoRetentionMode, onConfirmed: () -> Unit) {
+        Timber.tag("MT-UI").i("OdometerCaptureScreen: OCR result confirmed tripId=%s, valueKm=%s", tripId, valueKm)
         viewModelScope.launch {
+            Timber.tag("MT-Trip").i("OdometerCaptureScreen: writing verifiedOdometerKm=%s for tripId=%s (OCR-confirmed)", valueKm, tripId)
             tripRepository.updateVerifiedOdometer(tripId, valueKm)
             tripPhotoRepository.savePhotoIfRetentionEnabled(tripId, imageUri, photoRetention)
             resolvePendingOcrForTrip()
@@ -84,6 +89,7 @@ class OdometerCaptureViewModel @Inject constructor(
             classification = trip.classification,
             businessReason = trip.businessReason,
         )
+        Timber.tag("MT-Trip").i("OdometerCaptureScreen: resolving PENDING_OCR -> %s for tripId=%s", resolvedStatus, tripId)
         tripRepository.updateStatus(tripId, resolvedStatus)
     }
 }

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- T-020 — debug-only Bluetooth diagnostics (dev/testing tool, NOT a field-tester feature).
+         Declared ONLY in this debug source set so it never merges into a release manifest; see
+         BluetoothDiagnosticsSnapshotImpl (src/debug) and BluetoothDiagnosticsModule (src/main).
+         BLUETOOTH_CONNECT is the API 31+ runtime permission required to read BluetoothDevice.name.
+         Legacy BLUETOOTH is the pre-31 "normal" permission for the same read; scoped to debug too
+         for consistency even though pre-31 it needs no runtime grant. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+
+</manifest>

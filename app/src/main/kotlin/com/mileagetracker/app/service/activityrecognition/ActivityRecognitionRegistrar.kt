@@ -4,14 +4,23 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import com.google.android.gms.location.ActivityRecognitionClient
+import com.google.android.gms.location.ActivityTransition
+import com.google.android.gms.location.ActivityTransitionRequest
+import com.google.android.gms.location.DetectedActivity
 import dagger.hilt.android.qualifiers.ApplicationContext
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Registers/unregisters the ActivityRecognition transition request. T-001 scaffolding only —
- * the exact `ActivityTransitionRequest` (which transitions, IN_VEHICLE confidence wiring) is
- * geo-sensors-specialist's call (T-002, blueprint open question 1).
+ * Registers/unregisters the ActivityRecognition transition request (T-002.3, per
+ * `team/blueprints/T-002-vehicle-detection-spec.md` §3).
+ *
+ * Both `IN_VEHICLE` ENTER and EXIT are registered on the same [ActivityTransitionRequest], even
+ * though only ENTER is currently acted on by [ActivityTransitionReceiver]. EXIT is reserved for
+ * a future stop-side signal-quality use (T-004) — registering it now costs nothing extra on the
+ * same request and avoids a second registration round-trip later. Do not remove the EXIT entry
+ * as "dead code" without re-reading the spec's §7 open-flags note.
  *
  * Idempotency requirement (blueprint §2 step 5): registering the same PendingIntent twice (e.g.
  * service restarted while a trip was already active) must not create a second trip. That
@@ -35,18 +44,39 @@ class ActivityRecognitionRegistrar @Inject constructor(
         )
     }
 
-    /**
-     * Registration body intentionally left for T-002 (geo-sensors-specialist): the real
-     * ActivityTransitionRequest (transition list, confidence handling) is not yet defined here.
-     */
+    private fun buildTransitionRequest(): ActivityTransitionRequest {
+        val enterInVehicle = ActivityTransition.Builder()
+            .setActivityType(DetectedActivity.IN_VEHICLE)
+            .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+            .build()
+
+        val exitInVehicle = ActivityTransition.Builder()
+            .setActivityType(DetectedActivity.IN_VEHICLE)
+            .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT)
+            .build()
+
+        return ActivityTransitionRequest(listOf(enterInVehicle, exitInVehicle))
+    }
+
     fun register() {
-        buildTransitionPendingIntent()
-        // T-002 TODO (geo-sensors-specialist): build ActivityTransitionRequest with the locked
-        // 70% start-confidence semantics and call activityRecognitionClient.requestActivityTransitionUpdates(...).
+        val pendingIntent = buildTransitionPendingIntent()
+        activityRecognitionClient.requestActivityTransitionUpdates(buildTransitionRequest(), pendingIntent)
+            .addOnSuccessListener {
+                Timber.tag("MT-ActivityRecognition").i("Transition updates registered (IN_VEHICLE ENTER+EXIT)")
+            }
+            .addOnFailureListener { registrationFailure ->
+                Timber.tag("MT-ActivityRecognition").e(registrationFailure, "Failed to register transition updates")
+            }
     }
 
     fun unregister() {
         activityRecognitionClient.removeActivityTransitionUpdates(buildTransitionPendingIntent())
+            .addOnSuccessListener {
+                Timber.tag("MT-ActivityRecognition").i("Transition updates unregistered")
+            }
+            .addOnFailureListener { unregisterFailure ->
+                Timber.tag("MT-ActivityRecognition").e(unregisterFailure, "Failed to unregister transition updates")
+            }
     }
 
     private companion object {

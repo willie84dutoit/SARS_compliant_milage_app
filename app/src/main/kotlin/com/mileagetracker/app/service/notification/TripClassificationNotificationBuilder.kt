@@ -12,9 +12,23 @@ import javax.inject.Inject
 
 /**
  * Builds the trip-classification prompt notification, with a lock-screen-usable action (brief
- * §5.2: "must be usable from the lock screen if the device allows it"). T-001 scaffolding only —
- * the exact action-button wiring (open classification screen directly vs. wake screen first) is
- * finished alongside T-002/T-003's notification-triggered navigation.
+ * §5.2: "must be usable from the lock screen if the device allows it").
+ *
+ * T-003 (final wiring): tapping the notification fires [contentIntent] targeting
+ * [com.mileagetracker.app.MainActivity] with [ACTION_OPEN_TRIP_CLASSIFICATION] /
+ * [EXTRA_TRIP_ID]. `MainActivity.onCreate`/`onNewIntent` extract the tripId and push it through
+ * `PendingTripClassificationNavigationStore`, which `MileageTrackerNavHost` consumes to navigate
+ * straight to `Screen.TripClassification`, satisfying "open the classification screen directly,
+ * not just the home screen." `MainActivity` itself calls `setShowWhenLocked(true)`/
+ * `setTurnScreenOn(true)` (plus the matching manifest attributes) to wake/show over the lock
+ * screen on tap; this builder deliberately does NOT also set a full-screen intent
+ * (`setFullScreenIntent`) — the brief's requirement is "wake the screen **when the user taps the
+ * notification action**," not an unprompted heads-up popup over the lock screen the way an
+ * incoming call behaves, and `USE_FULL_SCREEN_INTENT` carries its own elevated-permission/OEM-
+ * revocation risk on API 33+ that this lower-risk tap-driven design avoids entirely. If a device's
+ * own policy disallows showing any activity over its lock screen, Android requires unlock first
+ * and then shows [com.mileagetracker.app.MainActivity] normally — satisfying brief §5.2's explicit
+ * fallback ("must still open the app normally") with no extra branching needed in this class.
  */
 class TripClassificationNotificationBuilder @Inject constructor(
     @ApplicationContext private val appContext: Context,

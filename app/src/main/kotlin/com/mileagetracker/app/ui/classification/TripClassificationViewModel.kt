@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 /**
@@ -44,6 +45,7 @@ class TripClassificationViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             val trip = tripRepository.getTripById(tripId)
+            Timber.tag("MT-Trip").i("TripClassificationScreen: loaded trip for classification tripId=%s, found=%s", tripId, trip != null)
             _uiState.value = _uiState.value.copy(
                 trip = trip,
                 selectedClassification = trip?.classification,
@@ -53,6 +55,7 @@ class TripClassificationViewModel @Inject constructor(
     }
 
     fun onClassificationSelected(classification: TripClassification) {
+        Timber.tag("MT-UI").i("TripClassificationScreen: classification selected tripId=%s, classification=%s", tripId, classification)
         _uiState.value = _uiState.value.copy(selectedClassification = classification, validationErrorMessage = null)
     }
 
@@ -64,10 +67,12 @@ class TripClassificationViewModel @Inject constructor(
     fun onSaveClassification(onSaved: () -> Unit) {
         val currentState = _uiState.value
         val classification = currentState.selectedClassification ?: return
+        Timber.tag("MT-UI").i("TripClassificationScreen: Save button clicked tripId=%s, classification=%s", tripId, classification)
 
         if (classification == TripClassification.WORK) {
             val validationResult = ClassificationRules.validateBusinessReason(currentState.businessReasonText)
             if (validationResult is ClassificationRules.ValidationResult.Invalid) {
+                Timber.tag("MT-UI").e("TripClassificationScreen: Save blocked by validation tripId=%s, reason=%s", tripId, validationResult.reason)
                 _uiState.value = currentState.copy(validationErrorMessage = validationResult.reason)
                 return
             }
@@ -80,6 +85,10 @@ class TripClassificationViewModel @Inject constructor(
             } else {
                 null
             }
+            Timber.tag("MT-Trip").i(
+                "TripClassificationScreen: writing classification tripId=%s, classification=%s, businessReason=%s",
+                tripId, classification, businessReasonToStore,
+            )
             tripRepository.updateClassification(tripId, classification, businessReasonToStore)
             _uiState.value = _uiState.value.copy(isSaving = false)
             onSaved()

@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import javax.inject.Inject
 
 /** Result of a debug log export attempt, rendered as UI state. */
@@ -58,6 +59,7 @@ class SettingsViewModel @Inject constructor(
     )
 
     fun onPhotoRetentionToggled(isSaveEnabled: Boolean) {
+        Timber.tag("MT-UI").i("SettingsScreen: photo retention toggled to isSaveEnabled=%s", isSaveEnabled)
         viewModelScope.launch {
             val mode = if (isSaveEnabled) PhotoRetentionMode.SAVED else PhotoRetentionMode.TEMPORARY
             settingsRepository.setPhotoRetentionMode(mode)
@@ -65,12 +67,14 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun onBluetoothVehicleTriggerToggled(isEnabled: Boolean) {
+        Timber.tag("MT-UI").i("SettingsScreen: Bluetooth vehicle trigger toggled to isEnabled=%s", isEnabled)
         viewModelScope.launch {
             settingsRepository.setBluetoothVehicleTriggerEnabled(isEnabled)
         }
     }
 
     fun onExportDebugLogClicked() {
+        Timber.tag("MT-UI").i("SettingsScreen: Export debug log button clicked")
         viewModelScope.launch {
             val exportResult = withContext(Dispatchers.IO) {
                 debugLogFileProvider.exportDebugLogToDownloads()

@@ -50,4 +50,28 @@ class TripLifecycleStateMachineTest {
         )
         assertEquals(TripStatus.COMPLETED, status)
     }
+
+    @Test
+    fun `low confidence retry exhausted moves to PromptPending with forced low confidence flag`() {
+        val nextPhase = stateMachine.onStartEvent(
+            currentPhase = TripLifecycleStateMachine.TransientPhase.NoTrip,
+            event = TripStartEvent.LowConfidenceRetryExhausted(lastObservedConfidencePercent = 45),
+        )
+        assert(nextPhase is TripLifecycleStateMachine.TransientPhase.PromptPending)
+        val promptPending = nextPhase as TripLifecycleStateMachine.TransientPhase.PromptPending
+        assertEquals(45, promptPending.confidencePercent)
+        assertEquals(true, promptPending.isForcedLowConfidence)
+    }
+
+    @Test
+    fun `manual start moves to PromptPending at full confidence, not forced low confidence`() {
+        val nextPhase = stateMachine.onStartEvent(
+            currentPhase = TripLifecycleStateMachine.TransientPhase.NoTrip,
+            event = TripStartEvent.ManualStart(startedAtEpochMillis = 0L),
+        )
+        assert(nextPhase is TripLifecycleStateMachine.TransientPhase.PromptPending)
+        val promptPending = nextPhase as TripLifecycleStateMachine.TransientPhase.PromptPending
+        assertEquals(100, promptPending.confidencePercent)
+        assertEquals(false, promptPending.isForcedLowConfidence)
+    }
 }

@@ -3,29 +3,59 @@ package com.mileagetracker.app.service.activityrecognition
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import com.mileagetracker.app.domain.repository.TripRepository
+import com.google.android.gms.location.ActivityTransition
+import com.google.android.gms.location.ActivityTransitionResult
+import com.google.android.gms.location.DetectedActivity
 import dagger.hilt.android.AndroidEntryPoint
+import timber.log.Timber
 import javax.inject.Inject
 
 /**
- * Receives ActivityTransitionResult broadcasts. T-001 scaffolding only — the actual transition
- * parsing and hand-off into [com.mileagetracker.app.domain.statemachine.TripLifecycleStateMachine]
- * is wired in T-002, coordinated with geo-sensors-specialist (blueprint open question 1).
+ * Receives `ActivityTransitionResult` broadcasts (T-002.3, per
+ * `team/blueprints/T-002-vehicle-detection-spec.md` §3).
  *
- * Injects [TripRepository] directly (not a DAO) so any transition-driven trip creation still
- * respects the no-duplicate-trip recovery check (blueprint §2) — this receiver must call
- * `tripRepository.getInProgressTrip()` before triggering a new trip, the same discipline the
- * foreground service's `onStartCommand` follows.
+ * This receiver does **not** start a trip directly and does **not** construct a
+ * [com.mileagetracker.app.domain.statemachine.TripStartEvent] itself — the Transition API event
+ * carries no confidence value (only `activityType`/`transitionType`/`elapsedRealTimeNanos`), so
+ * there is nothing here to feed `TripLifecycleStateMachine.onStartEvent()` with. On `ENTER` it
+ * hands off to [confidenceEntryGateway] (the T-002.4 seam — see
+ * [VehicleEntryConfidenceGateway]'s doc for what plugs in there once the confidence-acquisition
+ * window exists). `EXIT` is logged only — T-004 owns stop detection via
+ * inactivity/unstable-signal/manual, not the Transition API's EXIT signal.
  */
 @AndroidEntryPoint
 class ActivityTransitionReceiver : BroadcastReceiver() {
 
     @Inject
-    lateinit var tripRepository: TripRepository
+    lateinit var confidenceEntryGateway: VehicleEntryConfidenceGateway
 
     override fun onReceive(context: Context, intent: Intent) {
-        // T-002 TODO (geo-sensors-specialist + android-engineer): parse ActivityTransitionResult
-        // from intent, feed the confidence value into TripLifecycleStateMachine.onStartEvent,
-        // and gate any new-trip creation on tripRepository.getInProgressTrip() == null first.
+        if (!ActivityTransitionResult.hasResult(intent)) return
+
+        val result = ActivityTransitionResult.extractResult(intent) ?: return
+
+        for (event in result.transitionEvents) {
+            if (event.activityType != DetectedActivity.IN_VEHICLE) continue
+
+            when (event.transitionType) {
+                ActivityTransition.ACTIVITY_TRANSITION_ENTER -> {
+                    Timber.tag("MT-ActivityRecognition")
+                        .i("IN_VEHICLE ENTER received at %d", event.elapsedRealTimeNanos)
+                    // TODO(T-002.4): once ConfidenceAcquisitionWindowImpl exists, this call site
+                    // is what triggers its 30s confidence-acquisition window. For now this is a
+                    // no-op (see NoOpVehicleEntryConfidenceGateway) — no trip lifecycle progress
+                    // happens from this event yet.
+                    confidenceEntryGateway.onVehicleEntryDetected(enteredAtEpochMillis = System.currentTimeMillis())
+                }
+
+                ActivityTransition.ACTIVITY_TRANSITION_EXIT -> {
+                    Timber.tag("MT-ActivityRecognition")
+                        .i("IN_VEHICLE EXIT received at %d", event.elapsedRealTimeNanos)
+                    // No action in T-002 — EXIT is not part of the locked stop rule (T-004 owns
+                    // stop detection via inactivity/unstable-signal/manual only). Logged for
+                    // telemetry only.
+                }
+            }
+        }
     }
 }

@@ -1,6 +1,6 @@
 # Kanban Board
 
-Last moved: 2026-06-22 · Maintained by the Manager. WIP limit on **In Progress** = 3.
+Last moved: 2026-06-23 · Maintained by the Manager. WIP limit on **In Progress** = 3.
 Story details in `../userstories/`; task breakdown in `../team/TASKS.md`; the literal build steps
 each checkbox below refers to live in `../team/blueprints/FULL_IMPLEMENTATION_PLAN.md` (`T-XXX.Y`
 ids match exactly — open that file for the How/Verify behind any box here).
@@ -11,21 +11,6 @@ ids match exactly — open that file for the How/Verify behind any box here).
 ---
 
 ## 📋 Backlog
-
-### T-002 · Vehicle detection (ActivityRecognition) — US-001, US-007
-**Owner role:** _geo-sensors-specialist + android-engineer_ · Blocked-by: T-001
-- [ ] T-002.1 Request the runtime permission
-- [ ] T-002.2 Specify the domain start-event types
-- [ ] T-002.3 Register the always-on Transition API trigger
-- [ ] T-002.4 Specify the confidence-acquisition window
-- [ ] T-002.5 Specify the optional Bluetooth trigger
-
-### T-003 · Trip classification flow (Work/Private) — US-002
-**Owner role:** _android-engineer_ · Blocked-by: T-001
-- [ ] T-003.1 Create the notification channel
-- [ ] T-003.2 Specify the business-reason validation rule
-- [ ] T-003.3 Specify the lock-screen actionable notification
-- [ ] T-003.4 Wire the pending-business-reason gate
 
 ### T-004 · GPS distance tracking + trip-end detection — US-004
 **Owner role:** _geo-sensors-specialist_ · Blocked-by: T-002
@@ -133,21 +118,7 @@ _(empty — Manager promotes a card here once it's unblocked and fully scoped)_
 
 ---
 
-## 🔧 In Progress  _(WIP 3/3 — at limit)_
-
-### T-001 · Scaffold Android project (Kotlin, Compose, Room, Hilt) — underlies all MVP stories
-**Owner role:** _android-engineer_ · Blocked-by: none
-- [x] T-001.1 Install the toolchain
-- [x] T-001.2 Create the Gradle project skeleton
-- [x] T-001.3 Configure app/build.gradle.kts
-- [x] T-001.4 Declare the manifest
-- [x] T-001.5 Build and run the shell (debug APK builds; full screen set already present, beyond the minimum placeholder)
-- [x] android-engineer review pass against the blueprint + T-008 signing columns (2026-06-22: conforms; T-008 columns present; tests pass — but 2 blockers found, below)
-- [x] `./gradlew test` actually run and passing (2026-06-22 re-verified: all 5 unit-test classes pass, debug + release; 2026-06-19: `assembleDebug` BUILD SUCCESSFUL via JBR JDK 21; APK installed + launched on emulator-5554, no crash)
-- [x] ⚠️ HIGH blocker FIXED 2026-06-22 — service now driven by `TripLifecycleStateMachine` (start-side transient-phase resolution + stop-side `TripStatus`); state machine is no longer dead code; all tests still green
-- [x] ⚠️ MEDIUM blocker FIXED 2026-06-22 — `service/di/ServiceModule.kt` created per blueprint §3
-- [x] Committed to git + pushed to public remote (commit `c846b05`, 2026-06-22, `origin/main`)
-- _✅ T-001 fully DONE 2026-06-22 — verified, fixed, committed, pushed._
+## 🔧 In Progress  _(WIP 2/3)_
 
 ### T-014 · Repo, Docker & CI setup — US-106
 **Owner role:** _devops-engineer_ · Blocked-by: none
@@ -180,6 +151,72 @@ _(empty)_
 
 ## ✅ Done
 
+### T-002 · Vehicle detection (ActivityRecognition) — DONE 2026-06-23 — US-001, US-007
+**Owner role:** _geo-sensors-specialist + android-engineer_ · Blocked-by: ~~T-001~~ (Done — unblocked)
+- [x] T-002.1 Request the runtime permission _(android-engineer — finished the incomplete shell:_
+  _two-step background-location request, real grant-state tracking via `SetupPermissionsPlanner`,_
+  _limited-mode banner rule per brief §8, NavHost first-run bug fixed, restricted-settings field_
+  _finding investigated and ruled out — full detail in `team/LOGS.md`'s 2026-06-23 11:15 DONE entry)_
+- [x] T-002.2 Domain start-event types _(scaffold type + `onStartEvent`; 2 tests added 2026-06-22 chunk 1 → 7/7 green)_
+- [x] T-002.3 Register the always-on Transition API trigger _(registrar + receiver bodies + `MT-ActivityRecognition` logging done 2026-06-22 chunk 1; ENTER→gateway seam, EXIT no-op)_
+- [x] T-002.4 Specify the confidence-acquisition window _(`ConfidenceAcquisitionWindow`/`Impl` built 2026-06-22 chunk 2; 4 spec §5 virtual-time tests green; bound `@Singleton` — see TASKS.md deviation note)_
+- [ ] T-002.5 Specify the optional Bluetooth trigger _(remains deliberately parked/deferred, off-by-default; extended-scope idea — named vehicle profiles + cross-validation logging — parked in TASKS.md, not MVP, NOT part of this Done card)_
+- _2026-06-22: geo-sensors-specialist DESIGN pass → `team/blueprints/T-002-vehicle-detection-spec.md`._
+- _2026-06-22 chunk 1 (android-engineer): T-002.2 tests + T-002.3 bodies, `./gradlew test` green. T-002.4_
+  _seam = `VehicleEntryConfidenceGateway` (no-op binding in `ActivityRecognitionModule`); next chunk swaps in_
+  _`ConfidenceAcquisitionWindowImpl` + wires it into the service. Receiver calls `onVehicleEntryDetected(...)` on IN_VEHICLE ENTER._
+- _2026-06-22 chunk 2 (android-engineer): `ConfidenceAcquisitionWindowImpl` + `ConfidenceUpdateReceiver` +_
+  _`ActivityUpdatesRegistrar` seam built; Hilt rebound from the `NoOp` placeholder; `./gradlew test` 26/26._
+- _2026-06-23 (android-engineer, T-002.1 closing chunk): `SetupPermissionsPlanner` (pure Kotlin) +_
+  _real `ContextCompat.checkSelfPermission`-backed grant tracking + two-step background-location_
+  _request + `StartDestinationViewModel` (fixes the NavHost always-shows-Setup bug) + `MT-UI`_
+  _logging. Restricted-settings theory ruled out against Android's actual documented scope (it_
+  _gates Accessibility/Notification-Listener/Device-Admin, not standard dangerous permissions);_
+  _added an in-app advisory line as a safety net regardless of root cause. `./gradlew test`: debug_
+  _59/59, release 59/59, 0 failures/errors (11 test classes, JUnit XML read directly — 3 new classes,_
+  _21 new cases). `./gradlew assembleDebug` green. Not committed/pushed — awaiting user go-ahead._
+- ✅ _Alongside, not part of T-002 itself: **T-020** (debug-only Bluetooth connection diagnostic logging,_
+  _user's own testing only, see `team/TASKS.md`) DONE 2026-06-22 — kept off this board's WIP count_
+  _since it's a small dev-tool task riding with T-002's testing, not a separate kanban card. Also fixed_
+  _a real leak found along the way: `BLUETOOTH_CONNECT`/`BLUETOOTH_SCAN` had been speculatively declared_
+  _in the main manifest since T-001 — removed; now debug-build-only as intended._
+
+### T-003 · Trip classification flow (Work/Private) — DONE 2026-06-23 — US-002
+**Owner role:** _android-engineer_ · Blocked-by: T-001
+- [x] T-003.1 Create the notification channel (`mileage_tracker_trip_alerts`, HIGH — built earlier;
+  notification now actually `notify()`-ed for the first time, see T-003.3)
+- [x] T-003.2 Specify the business-reason validation rule (`ClassificationRules.validateBusinessReason`,
+  wired into `TripClassificationViewModel.onSaveClassification` — built earlier, confirmed still correct)
+- [x] T-003.3 Specify the lock-screen actionable notification — notification fire wired into the
+  single shared `TripTrackingForegroundService.handleStopEvent` tail; `MainActivity.onCreate`/
+  `onNewIntent` + new `PendingTripClassificationNavigationStore` nav seam route straight to
+  `Screen.TripClassification`; `setShowWhenLocked`/`setTurnScreenOn` wake-on-tap; brief §5.2's
+  "must still open the app normally" fallback needs no extra code (Android's own default behavior)
+- [x] T-003.4 Wire the pending-business-reason gate (`TripStatus.PENDING_BUSINESS_REASON` — built
+  earlier, confirmed still correct)
+- _Verified 2026-06-23: `./gradlew test` JUnit XML read directly — debug 38/38, release 38/38, 0
+  failures/errors (8 test classes each, incl. new `PendingTripClassificationNavigationStoreTest`,
+  7 cases). `./gradlew assembleDebug` green. Not committed/pushed — awaiting explicit user go-ahead._
+
+### T-001 · Scaffold Android project (Kotlin, Compose, Room, Hilt) — DONE 2026-06-22 — underlies all MVP stories
+**Owner role:** _android-engineer_ · Blocked-by: none
+- [x] T-001.1 Install the toolchain
+- [x] T-001.2 Create the Gradle project skeleton
+- [x] T-001.3 Configure app/build.gradle.kts
+- [x] T-001.4 Declare the manifest
+- [x] T-001.5 Build and run the shell (debug APK builds; full screen set already present, beyond the minimum placeholder)
+- [x] android-engineer review pass against the blueprint + T-008 signing columns (2026-06-22: conforms; T-008 columns present; tests pass)
+- [x] `./gradlew test` actually run and passing (2026-06-22 re-verified: all 5 unit-test classes pass, debug + release; 2026-06-19: `assembleDebug` BUILD SUCCESSFUL via JBR JDK 21; APK installed + launched on emulator-5554, no crash)
+- [x] ⚠️ HIGH blocker FIXED 2026-06-22 — service now driven by `TripLifecycleStateMachine` (start-side transient-phase resolution + stop-side `TripStatus`); state machine is no longer dead code; all tests still green
+- [x] ⚠️ MEDIUM blocker FIXED 2026-06-22 — `service/di/ServiceModule.kt` created per blueprint §3
+- [x] Committed to git + pushed to public remote (commit `c846b05`, 2026-06-22, `origin/main`)
+- _✅ T-001 fully DONE 2026-06-22 — both review blockers were already fixed in `c846b05` (the T-018 pass,
+  same files). Card relocated here from In Progress 2026-06-22 after an android-engineer fix-verify pass
+  re-confirmed it via a clean `./gradlew clean test` (BUILD SUCCESSFUL, 62 tasks, all 5 test classes green,
+  debug + release) — no new source changes needed (working tree clean)._
+- ℹ️ Deferred to T-002 (not blocking): ActivityRecognition auto-start is registered but not yet feeding
+  `TripStartEvent.ConfidentVehicleEntry` into the state machine (tagged TODO in the service class doc).
+
 ### T-008 · Cryptographic trip signing (tamper-evident logbook) — design decided 2026-06-18 — US-101
 **Owner role:** _security-crypto-specialist_ · `/team-debate`, 2 rounds + cost ruling
 - [x] Per-trip ECDSA P-256 signature (Android Keystore, StrongBox→TEE fallback)
@@ -190,6 +227,15 @@ _(empty)_
 - [x] Cost ruling: APPROVE ($0 MVP impact)
 - _(the design is what's Done here — the actual implementation steps, T-008.1–T-008.5, are listed
   under T-006's Backlog card above and get checked off there, not here, when T-006 executes them)_
+
+### T-021 · All-in-one dev environment startup script — DONE 2026-06-22
+**Owner role:** _devops-engineer_ · Blocked-by: none · added 2026-06-22
+- [x] `scripts/start-dev.ps1` — idempotent backend `.venv` + Flask check/start
+- [x] Idempotent Android emulator check/boot (`test_device`, 90s boot-completed poll)
+- [x] Always-run `gradlew installDebug` reload + `adb shell am start` launch
+- [x] Bonus `-Stop` switch (only stops what the script itself started)
+- _Verified end-to-end: cold start, immediate re-run (correctly skips already-running pieces), `-Stop`._
+- _Not committed yet — riding with T-002.4/T-020, awaiting explicit go-ahead._
 
 ### T-010 · Backend cost model — ruling delivered 2026-06-18
 **Owner role:** _cost-architect_

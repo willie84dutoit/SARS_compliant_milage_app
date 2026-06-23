@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import javax.inject.Inject
 
 /**
@@ -42,6 +43,7 @@ class ExportViewModel @Inject constructor(
     val uiState: StateFlow<ExportUiState> = _uiState.asStateFlow()
 
     fun onExportRequested() {
+        Timber.tag("MT-UI").i("ExportScreen: Export button clicked")
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isExportInProgress = true)
             val completedTrips = tripRepository.getCompletedTripsForExport()

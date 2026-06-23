@@ -61,7 +61,7 @@ fun SettingsScreen(
             }
 
             Button(onClick = viewModel::onExportDebugLogClicked) {
-                Text("Export debug log")
+                Text("Export debugging logs")
             }
 
             when (val result = uiState.lastDebugLogExportResult) {

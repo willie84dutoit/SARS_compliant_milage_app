@@ -1,6 +1,7 @@
 package com.mileagetracker.app.service
 
 import android.Manifest
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -20,8 +21,10 @@ import com.mileagetracker.app.domain.statemachine.TripLifecycleStateMachine
 import com.mileagetracker.app.domain.statemachine.TripStartEvent
 import com.mileagetracker.app.domain.statemachine.TripStopEvent
 import com.mileagetracker.app.service.activityrecognition.ActivityRecognitionRegistrar
+import com.mileagetracker.app.service.activityrecognition.ConfidenceAcquisitionWindow
 import com.mileagetracker.app.service.location.TripLocationCallback
 import com.mileagetracker.app.service.notification.TripAlertNotificationChannel
+import com.mileagetracker.app.service.notification.TripClassificationNotificationBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +32,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -48,13 +52,27 @@ import javax.inject.Inject
  * public API, the state machine's API is extended, not duplicated here (per the T-001 rewire
  * directive).
  *
- * Automatic ActivityRecognition-triggered start (T-002) is registered but not yet wired to feed
- * [TripStartEvent.ConfidentVehicleEntry] into [tripLifecycleStateMachine] — that lands once the
- * confidence-window logic (T-002.4) is implemented. For this MVP build the trip lifecycle is
- * driven by explicit [ACTION_START_TRIP]/[ACTION_STOP_TRIP] intents from
+ * Automatic ActivityRecognition-triggered start (T-002) is wired end to end: this service collects
+ * [confidenceAcquisitionWindow]'s [ConfidenceAcquisitionWindow.observeResults] flow (started once
+ * in [onCreate]) and feeds each emitted [TripStartEvent.ConfidentVehicleEntry] /
+ * [TripStartEvent.LowConfidenceRetryExhausted] into [tripLifecycleStateMachine] exactly the way the
+ * manual-start path below does, sharing the same insert/notify tail ([completeTripStart]) and the
+ * same [tripLifecycleMutex] discipline. Manual starts/stops continue to come from explicit
+ * [ACTION_START_TRIP]/[ACTION_STOP_TRIP] intents sent by
  * [com.mileagetracker.app.ui.home.HomeStatusViewModel], which the service maps to
  * [TripStartEvent.ManualStart] / [TripStopEvent.ManualStop] before asking the state machine what
  * happens next.
+ *
+ * A third entry point exists alongside the two action intents above: [com.mileagetracker.app.MainActivity]
+ * starts this service with **no action set** (a plain `Intent(context, TripTrackingForegroundService::class.java)`)
+ * on every app launch, purely so [onStartCommand] runs and calls [activityRecognitionRegistrar]'s
+ * `register()` even before any trip has ever been started manually — otherwise the automatic
+ * detection pipeline above never gets a chance to fire. `requestedAction == null` falls through the
+ * `when (requestedAction)` below as a deliberate no-op: the recovery check still runs (safe — it
+ * only re-attaches to an already-ACTIVE trip) and `register()` still re-runs (safe — re-registering
+ * the same PendingIntent is idempotent per [ActivityRecognitionRegistrar]'s own class doc). This is
+ * intentionally scoped to "app opened" only for this chunk; a boot-completed receiver and an
+ * always-on/sleeping-wake-on-detection redesign are explicitly deferred, not built here.
  */
 @AndroidEntryPoint
 class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
@@ -75,7 +93,13 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
     lateinit var tripAlertNotificationChannel: TripAlertNotificationChannel
 
     @Inject
+    lateinit var tripClassificationNotificationBuilder: TripClassificationNotificationBuilder
+
+    @Inject
     lateinit var tripLifecycleStateMachine: TripLifecycleStateMachine
+
+    @Inject
+    lateinit var confidenceAcquisitionWindow: ConfidenceAcquisitionWindow
 
     private val serviceJob: Job = SupervisorJob()
     private val serviceScope = CoroutineScope(serviceJob)
@@ -110,6 +134,22 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
      * atomic sequence, never as two independently-scheduled coroutines.
      */
     private val tripLifecycleMutex = Mutex()
+
+    override fun onCreate() {
+        super.onCreate()
+        // Started exactly once per service instance (onCreate runs once before any
+        // onStartCommand), so this is a single, never-resubscribed collector for the lifetime of
+        // the service — per T-002 spec §6, automatic start must not re-subscribe to this Flow on
+        // every onStartCommand. The per-event try/catch lives inside handleAutomaticStartEvent
+        // (not wrapped around this whole `collect`) so that one bad event is logged and skipped
+        // rather than throwing out of `collect` and silently ending the subscription for every
+        // subsequent ENTER event for the rest of the service's life.
+        serviceScope.launch {
+            confidenceAcquisitionWindow.observeResults().collect { startEvent ->
+                handleAutomaticStartEvent(startEvent)
+            }
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(FOREGROUND_NOTIFICATION_ID, buildPersistentNotification())
@@ -165,6 +205,11 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
             Timber.tag("MT-Service").e(unregisterException, "onDestroy step failed: activityRecognitionRegistrar.unregister")
         }
         runCatching {
+            confidenceAcquisitionWindow.cancel()
+        }.onFailure { confidenceWindowCancelException ->
+            Timber.tag("MT-Service").e(confidenceWindowCancelException, "onDestroy step failed: confidenceAcquisitionWindow.cancel")
+        }
+        runCatching {
             inactivityTimerJob?.cancel()
         }.onFailure { inactivityCancelException ->
             Timber.tag("MT-Service").e(inactivityCancelException, "onDestroy step failed: inactivityTimerJob.cancel")
@@ -203,6 +248,60 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
             event = TripStartEvent.ManualStart(startedAtEpochMillis = startedAtEpochMillis),
         )
 
+        completeTripStart(startedAtEpochMillis)
+    }
+
+    /**
+     * Automatic-start path (T-002): handles a terminal [TripStartEvent] emitted by
+     * [confidenceAcquisitionWindow]'s [ConfidenceAcquisitionWindow.observeResults] flow —
+     * [TripStartEvent.ConfidentVehicleEntry] or [TripStartEvent.LowConfidenceRetryExhausted].
+     * Mirrors [handleStartTripRequested] exactly (same no-op guard, same state-machine call, same
+     * [completeTripStart] tail) but is entered from the detection pipeline rather than a manual
+     * [ACTION_START_TRIP] intent, so it acquires [tripLifecycleMutex] itself rather than relying on
+     * [onStartCommand]'s existing critical section.
+     */
+    private suspend fun handleAutomaticStartEvent(startEvent: TripStartEvent) {
+        try {
+            tripLifecycleMutex.withLock {
+                // A confidence result can arrive after a trip has already started by some other
+                // path (manual start, or a second ENTER/result racing this one) — same no-op
+                // guard as handleStartTripRequested, re-checked here because this path is not
+                // gated by onStartCommand's own pre-action recovery check.
+                if (activeTripId != null) return@withLock
+                if (tripRepository.getInProgressTrip() != null) return@withLock
+
+                val startedAtEpochMillis = System.currentTimeMillis()
+
+                transientPhase = tripLifecycleStateMachine.onStartEvent(
+                    currentPhase = transientPhase,
+                    event = startEvent,
+                )
+
+                completeTripStart(startedAtEpochMillis)
+            }
+        } catch (cancellationException: CancellationException) {
+            throw cancellationException
+        } catch (unexpectedException: Exception) {
+            // Per T-002 spec §6 / item 5: one bad confidence-window result must not kill the
+            // collector for the rest of the service's life. Logged and skipped; the next ENTER
+            // event still gets its own confidence-acquisition window and its own chance to start
+            // a trip.
+            Timber.tag("MT-Service").e(
+                unexpectedException,
+                "handleAutomaticStartEvent failed for event=%s",
+                startEvent,
+            )
+        }
+    }
+
+    /**
+     * Shared tail for every start path (manual and automatic) once the state machine has already
+     * resolved [transientPhase] to [TripLifecycleStateMachine.TransientPhase.PromptPending] for
+     * the in-flight [TripStartEvent]. Resolves that phase into an active trip, performs the single
+     * `insertNewActiveTrip` call site (blueprint §2 anti-duplication guarantee), and starts GPS +
+     * stop timers. Caller must hold [tripLifecycleMutex].
+     */
+    private suspend fun completeTripStart(startedAtEpochMillis: Long) {
         val tripId = UUID.randomUUID().toString()
         val photoRetention = settingsRepository.observePhotoRetentionMode().first()
 
@@ -363,11 +462,42 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
         tripRepository.updateStatus(tripId, resolvedStatus)
         tripRepository.updateEndTimestamp(tripId, endTimestampEpochMillis = System.currentTimeMillis())
 
+        // T-003: single shared notify() call site for every stop path (manual, 3-min
+        // ConfirmedInactivity, 2-min UnstableSignalTimeout) — all three land here via this one
+        // `handleStopEvent` tail, so the notification is never duplicated per-path. Every stop
+        // today always resolves to PENDING_OCR (see the state-machine comment above), so this
+        // fires unconditionally rather than re-deciding when to notify.
+        notifyTripAwaitingClassification(tripId)
+
         activeTripId = null
         accumulatedDistanceMeters = 0.0
         tripLocationCallback.reset()
 
         stopSelf()
+    }
+
+    /**
+     * Posts the trip-classification prompt notification (brief §5.2) for [tripId] using a
+     * deterministic notification id — `tripId.hashCode()`, the same convention
+     * [TripClassificationNotificationBuilder] already uses for its `PendingIntent` request code —
+     * so re-stopping the same trip (should that ever happen, e.g. a future retry path) or restart
+     * recovery re-running this code path never stacks a second, duplicate notification for a trip
+     * that already has one showing; `notify()` with the same id simply replaces it.
+     */
+    private fun notifyTripAwaitingClassification(tripId: String) {
+        val notificationManager = ContextCompat.getSystemService(this, NotificationManager::class.java)
+        if (notificationManager == null) {
+            Timber.tag("MT-Service").e(
+                "notifyTripAwaitingClassification: NotificationManager unavailable, tripId=%s",
+                tripId,
+            )
+            return
+        }
+        Timber.tag("MT-Trip").i(
+            "TripTrackingForegroundService: trip stopped, posting classification notification tripId=%s",
+            tripId,
+        )
+        notificationManager.notify(tripId.hashCode(), tripClassificationNotificationBuilder.build(tripId))
     }
 
     private fun buildPersistentNotification() =

@@ -20,11 +20,13 @@
          (T-001 §2 recovery mechanism relies on this firing before a new trip can start). -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- Optional Bluetooth vehicle-trigger setting (brief §5.1, off by default; out of scope
-         for T-001 scaffolding but declared now so the permission flow doesn't need a manifest
-         change later). -->
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <!-- T-020 (2026-06-22): the BLUETOOTH_CONNECT/BLUETOOTH_SCAN permissions speculatively
+         declared here during T-001 scaffolding were REMOVED. They are now declared ONLY in
+         app/src/debug/AndroidManifest.xml (debug-only diagnostic logging, see
+         BluetoothDiagnosticsSnapshotImpl) so a release build — what field testers run — never
+         requests Bluetooth permissions at all. T-002.5's larger, deferred Bluetooth-as-detection-
+         trigger idea (team/TASKS.md) would need its own permission declaration here if/when it is
+         actually picked up; it is not built yet. -->
 
     <uses-feature
         android:name="android.hardware.camera"
@@ -64,6 +66,13 @@
              injected via Hilt, registered/unregistered by ActivityRecognitionRegistrar). -->
         <receiver
             android:name=".service.activityrecognition.ActivityTransitionReceiver"
+            android:exported="false" />
+
+        <!-- Confidence-acquisition window's requestActivityUpdates() PendingIntent target
+             (T-002.4: ConfidenceUpdateReceiver injected via Hilt, registered/unregistered by
+             ActivityUpdatesRegistrar — see team/blueprints/T-002-vehicle-detection-spec.md §4). -->
+        <receiver
+            android:name=".service.activityrecognition.ConfidenceUpdateReceiver"
             android:exported="false" />
 
     </application>

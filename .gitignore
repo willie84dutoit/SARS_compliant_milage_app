@@ -50,5 +50,9 @@ DerivedData/
 .DS_Store
 Thumbs.db
 
+# ── Local dev tooling runtime state ─────────────────────
+scripts/.dev-pids.json
+
 # ── Claude Code: keep agents/skills/memory, ignore local overrides ──
-.claude/settings.local.json
+.claude/
+

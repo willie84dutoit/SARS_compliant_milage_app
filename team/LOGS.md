@@ -588,3 +588,588 @@ TYPE is one of: DECISION, DEBATE, DELEGATION, COST, BLOCKER, DONE, NOTE.
   box on the board doesn't tell you anything concrete was finished.
 - **Cost impact:** n/a (planning doc only).
 - **Follow-up:** none.
+
+### [2026-06-22 (close)] DONE — T-001 (Scaffold Android project) confirmed Done; board reconciled
+- **Actor:** manager (delegated fix-verify to android-engineer)
+- **Context:** User believed T-001 was already done; the `team/TASKS.md` In-Progress card still listed
+  two open review blockers (HIGH: foreground service bypassing `TripLifecycleStateMachine`; MEDIUM:
+  missing `service/di/ServiceModule.kt`). Manager dispatched android-engineer to fix both and re-verify.
+- **Action / Decision:** android-engineer found **both blockers were already resolved in commit `c846b05`**
+  (the T-018 logging pass — same files, exactly as the earlier "Next" plan predicted), not outstanding work.
+  Verified by reading the actual sources (`TripTrackingForegroundService` injects + drives the state machine
+  through `onStartEvent`/`resolvePromptPendingIntoActiveTrip` and `handleStopEvent`/`onStopEvent` for all 3
+  stop paths, no hardcoded `TripStatus`; `ServiceModule.kt` present per blueprint §3) and a clean
+  `./gradlew clean test` → BUILD SUCCESSFUL, 62 tasks, all 5 unit-test classes green on debug + release.
+  No new source changes were required (working tree clean). T-001 declared **DONE**. Reconciled records:
+  `agile/board.md` T-001 card moved In Progress → Done (WIP 3/3 → 2/3); `team/TASKS.md` card annotated DONE
+  with blockers struck through + a Done-section pointer added.
+- **Rationale:** The work was finished and committed; only the tracking records had drifted. Closing the
+  card and fixing the drift keeps the board honest and unblocks the MVP backlog.
+- **Cost impact:** n/a ($0 — no cloud/architecture change; on-device only).
+- **Follow-up:** T-001 unblocks T-002–T-007 and T-017. One non-blocking carry-over: ActivityRecognition
+  auto-start is registered but not yet feeding `TripStartEvent.ConfidentVehicleEntry` into the state machine
+  — deferred to T-002 (TODO tagged in the service class doc).
+
+### [2026-06-22 (close)] DELEGATION — T-002 detection design (geo-sensors-specialist)
+- **Actor:** manager → geo-sensors-specialist
+- **Context:** T-001 Done unblocked T-002. User chose to start T-002 next. Owners (geo-sensors +
+  android-engineer) overlap on service/receiver/state-machine files, so ran sequentially (NOT parallel),
+  design→implement split.
+- **Action / Decision:** Delegated the detection DESIGN to geo-sensors-specialist (step 1 of 2). Spec
+  written to `team/blueprints/T-002-vehicle-detection-spec.md`. Findings: T-002.2 event types already
+  exist (only 2 tests missing); T-002.3 receiver/registrar shells exist with TODO bodies; T-002.4
+  confidence-acquisition window is net-new — designed `ConfidenceAcquisitionWindow` (5s second
+  subscription, running-MAX confidence, 30s TestScope-driveable timer, unregister-before-emit for battery
+  safety). No production code changed (spec only). Open flags: none on core design; widening the 30s window
+  later must go via /team-debate (battery cost); ENTER+EXIT both registered intentionally (reserved for T-004).
+- **Rationale:** Plan constants are locked; the real judgment was the confidence-window/battery design,
+  which is geo-sensors' domain. Implementation goes to android-engineer/android-coder next.
+- **Cost impact:** n/a ($0 — on-device ActivityRecognition only, no cloud/architecture change).
+- **Follow-up:** Step 2 — android-engineer (+ android-coder) implements from the spec & runs `./gradlew test`.
+  T-002.5 Bluetooth deferred to end of T-002.
+
+### [2026-06-22 (close)] DONE — T-002 chunk 1 (android-engineer): T-002.2 tests + T-002.3 bodies
+- **Actor:** manager → android-engineer
+- **Action:** Small first impl chunk per user's "small chunks" request. Added the 2 missing T-002.2 tests
+  (retry-exhausted + manual-start) → `TripLifecycleStateMachineTest` 7/7. Filled T-002.3 bodies:
+  `ActivityRecognitionRegistrar` (ActivityTransitionRequest IN_VEHICLE ENTER+EXIT, register/unregister,
+  `MT-ActivityRecognition` logging), `ActivityTransitionReceiver` (extractResult, ENTER→seam, EXIT no-op,
+  no direct trip start). Created T-002.4 seam `VehicleEntryConfidenceGateway` + no-op binding in new
+  `ActivityRecognitionModule`. `./gradlew test` + `assembleDebug` both BUILD SUCCESSFUL.
+- **Cost impact:** n/a ($0, on-device).
+- **Follow-up:** chunk 2 = `ConfidenceAcquisitionWindowImpl : VehicleEntryConfidenceGateway` (T-002.4),
+  swap the binding, wire into service's `tripLifecycleMutex` flow. Then T-002.1 permission flow. Uncommitted.
+
+### [2026-06-22 (close)] DONE — T-002 chunk 2 (android-engineer): ConfidenceAcquisitionWindowImpl built (T-002.4)
+- **Actor:** manager → android-engineer
+- **Context:** Continuing the small-chunks plan from chunk 1. This chunk's scope was strictly the
+  confidence-acquisition window itself — explicitly NOT the service wiring (kept as a separate future
+  chunk, since the spec itself flags that as a judgment call to keep apart from the mechanical window build).
+- **Action / Decision:** Built `ConfidenceAcquisitionWindow`/`ConfidenceAcquisitionWindowImpl` (running-max
+  confidence tracking, 30s injected-`CoroutineScope` timer, unregister-before-emit on both terminal paths,
+  re-entrant `startWindow()` no-op) per spec §4. Added `ConfidenceUpdateReceiver` (separate
+  `@AndroidEntryPoint` receiver, thin parser only) and a new `ActivityUpdatesRegistrar` seam (judgment call
+  beyond the spec's literal pseudocode: the real `ActivityRecognitionClient` is a concrete Play Services
+  class with no public interface, so it can't be hand-faked under this project's no-mocking-framework
+  convention — the seam keeps `ConfidenceAcquisitionWindowImpl` unit-testable). Rebound
+  `VehicleEntryConfidenceGateway` in `ActivityRecognitionModule` from the `NoOp` placeholder to the real impl.
+  **Hilt scope decision:** bound `@Singleton` (not the spec's suggested `@ServiceScoped`) — the new
+  `ConfidenceUpdateReceiver`, like the existing `ActivityTransitionReceiver`, is an `@AndroidEntryPoint
+  BroadcastReceiver` that can run independently of the foreground service's lifecycle, so a service-scoped
+  binding would be unreachable when either receiver fires without the service's Hilt graph active. Documented
+  as a no-delete-compliant strikethrough note in `team/blueprints/T-002-vehicle-detection-spec.md` §6.
+  `./gradlew test`: 26 tests, 0 failures, including the 4 new spec §5 virtual-time test cases (confident-entry
+  cancels timer; all-below-70-for-30s fires retry-exhausted with running max not latest; high-then-low doesn't
+  erase the max; re-entrant `startWindow` is a no-op).
+- **Rationale:** Keeps each chunk small and independently verifiable per the user's explicit request to limit
+  loss if a session runs out of tokens mid-work.
+- **Cost impact:** n/a ($0, on-device only — no new permission beyond the already-declared
+  `ACTIVITY_RECOGNITION`).
+- **Follow-up:** Still open for T-002: T-002.1 (permission-request screen, not built) and wiring
+  `ConfidenceAcquisitionWindow.observeResults()` into `TripTrackingForegroundService` (the shared
+  insert/notify tail extraction the spec flags as a judgment call, not boilerplate). Uncommitted.
+
+### [2026-06-22 (close)] NOTE — Bluetooth detection idea: extended scope parked (T-002.5); T-020 opened for debug-only diagnostic logging
+- **Actor:** manager (user request)
+- **Context:** User proposed Bluetooth-paired-vehicle detection as an additional, more reliable trigger
+  (named profiles `my_vehicle_1/2/3`, saved pairing config), explicitly caveated that auto-connect
+  reliability varies by vehicle/head-unit (their own car requires a manual head-unit selection) and floated
+  using Bluetooth connection state as ground truth to validate the other detection methods, eventually
+  feeding an ML model — explicitly NOT needed for the MVP. Separately, user asked for a much smaller,
+  immediate piece: log Bluetooth connection state (`true`/`false` + device name) alongside the existing
+  `MT-ActivityRecognition` log lines, for their own testing only — explicitly not for field testers, since
+  they have one car and testers will have differing cars/behaviours warranting separately-specified testing
+  later.
+- **Action / Decision:** Logged the full named-profile/detection-trigger/ML-groundwork idea as deferred
+  extended scope on T-002.5 in `team/TASKS.md` (not implemented now). Opened **T-020** — debug-only
+  Bluetooth connection diagnostic logging — scoped to exactly: a `bluetoothConnected: true/false` +
+  device-name/id field logged alongside `MT-ActivityRecognition` lines, debug-builds-only via Gradle
+  build-type source sets (`BLUETOOTH_CONNECT` permission declared only in `app/src/debug/AndroidManifest.xml`;
+  release variant gets a no-op implementation, no permission, nothing logged) so field testers' builds are
+  entirely unaffected. No UI permission-grant flow planned — a debug-only diagnostic tool degrades to a
+  "permission not granted" log line rather than prompting. Decided directly with the user (asked via
+  `AskUserQuestion` about debug-only vs. shipped-to-everyone vs. hidden-toggle; user's reply described the
+  minimal field shape rather than picking a letter, read as confirming the debug-only default — confirmed
+  explicitly moments later: "yes..its for debugging only"). Mirrored onto `agile/board.md` as a note under
+  T-002's card rather than a 4th In-Progress card, to keep the WIP-3 limit honest (T-020 isn't a kanban-level
+  user-facing feature, it rides alongside T-002's own testing).
+- **Rationale:** Separates a genuinely useful, low-cost diagnostic instrument (ship now, debug-only, helps
+  tune detection thresholds toward ~99-100% accuracy by cross-referencing logged confidence against a
+  manually-confirmed "was I actually driving") from a much bigger, not-yet-justified feature (named vehicle
+  profiles as a real detection trigger) that has real reliability caveats the user identified themselves.
+- **Cost impact:** n/a ($0 — on-device only, debug-build-only, no cloud touch).
+- **Follow-up:** T-020 implementation not yet started — next step is delegating to android-engineer.
+  T-002.5's extended scope stays parked in `team/TASKS.md` until actually picked up.
+
+### [2026-06-22 (close)] DONE — T-020 built: debug-only Bluetooth diagnostic logging; pre-existing manifest leak fixed
+- **Actor:** manager → android-engineer
+- **Action / Decision:** Built `BluetoothDiagnosticsSnapshot` (shared interface, `src/main`) with a real
+  implementation in `app/src/debug/...` (dynamically-registered `BroadcastReceiver` for ACL
+  connect/disconnect, held entirely inside the debug-only `@Singleton` — not a manifest receiver, so the
+  "doesn't exist in release" property is contained to one file pair) and a trivial no-op implementation
+  in `app/src/release/...`. `BLUETOOTH_CONNECT`/legacy `BLUETOOTH` declared ONLY in
+  `app/src/debug/AndroidManifest.xml`. Wired into all 3 `MT-ActivityRecognition` log lines in
+  `ConfidenceAcquisitionWindowImpl` via a new `BluetoothDiagnosticsModule` Hilt binding. Graceful
+  degradation: falls back to the device MAC as the label if the permission isn't granted, one-time
+  `MT-Bluetooth` warning instead of per-reading spam, `SecurityException` guarded around the actual read.
+  `./gradlew clean test assembleDebug`: 6 test classes × 2 variants, 30 tests each, 0 failures.
+  **Verified the release manifest has zero trace** by inspecting
+  `processReleaseManifestForPackage`'s merged output directly — no `BLUETOOTH_CONNECT`/`BLUETOOTH`
+  anywhere; confirmed present in the debug merged manifest as expected.
+- **Real bug found and fixed (not part of the original ask):** `app/src/main/AndroidManifest.xml` already
+  speculatively declared `BLUETOOTH_CONNECT`/`BLUETOOTH_SCAN` from T-001 scaffolding. Left alone, this
+  would have shipped the Bluetooth permission request to every field tester regardless of today's
+  debug-only work — directly defeating the point of this task. Removed from `src/main`.
+- **Scope note:** deliberately limited to `ConfidenceAcquisitionWindowImpl`'s 3 log lines, per the brief's
+  own allowance to skip `ActivityTransitionReceiver`'s purely-informational ENTER/EXIT lines if adding the
+  same wiring there added meaningful complexity for no real diagnostic gain.
+- **Rationale:** Read logs before fault-finding rule paid off in reverse here — the engineer's
+  verification step (actually inspecting the merged manifest rather than trusting the source files) is
+  what caught the pre-existing leak; a source-only review would have missed it since the speculative
+  declaration looked intentional at a glance.
+- **Cost impact:** n/a ($0 — on-device only, debug-build-only).
+- **Follow-up:** Not committed yet — awaiting explicit user go-ahead per standing rule. T-002 still has
+  T-002.1 (permission screen) and the service-wiring chunk open.
+
+### [2026-06-22 (close)] DONE — T-021: all-in-one dev environment startup script (devops-engineer)
+- **Actor:** manager → devops-engineer
+- **Context:** User asked for one idempotent PowerShell script that checks whether the Python backend
+  `.venv`/Flask server and the Android emulator + app are already running, starting only what's
+  missing, then always doing a fresh app reload — to stop manually re-running the same handful of
+  commands every session.
+- **Action / Decision:** Built `scripts/start-dev.ps1`. Backend: creates `backend/.venv` + installs
+  `requirements.txt` only if absent; probes `http://127.0.0.1:8080/health` before starting
+  `backend\.venv\Scripts\python.exe app.py` as a background process (no shell activation needed).
+  Android: fails loudly (not silently) if `ANDROID_HOME`/`ANDROID_SDK_ROOT` is unset or invalid;
+  resolves `adb`/`emulator` explicitly under `$ANDROID_HOME` rather than assuming PATH; detects an
+  already-running emulator via `adb devices`, otherwise boots `test_device` in the background with a
+  90s `sys.boot_completed` poll and a real timeout error. Always runs `gradlew.bat installDebug` (the
+  actual reload step) and launches via `adb shell am start -n com.mileagetracker.app/.MainActivity`.
+  Prints a skipped-vs-started summary; surfaces real Gradle failures rather than swallowing them.
+  Added a bonus `-Stop` switch that only stops processes the script itself started (tracked via a new
+  git-ignored `scripts/.dev-pids.json`).
+- **Verification (actually run, not assumed):** cold start (venv created, Flask started, emulator
+  detected already running, `installDebug` BUILD SUCCESSFUL, app confirmed foregrounded via
+  `adb shell dumpsys activity activities` + `adb shell ps`); immediate re-run (correctly skipped
+  venv/Flask/emulator as already up, while still re-running `installDebug` every time); `-Stop`
+  (stopped only the Flask process the script itself started, left the pre-existing emulator
+  untouched).
+- **Two evidence-based deviations from the brief, both found by testing rather than guessed:**
+  (1) health-check probes `127.0.0.1` instead of `localhost` — PowerShell 7's `HttpClient`
+  intermittently stalls trying the IPv6 route first even though Flask binds `0.0.0.0`; (2) the
+  liveness-probe catch is broadened beyond a typed `WebException` catch, because PowerShell 7 throws
+  `TaskCanceledException` on timeout instead — the real exception text is still surfaced via
+  `-Verbose`; this is the brief's own "check first" pattern, not error suppression.
+- **Rationale:** Pure local dev tooling, explicitly devops-engineer's domain (".venv convention" +
+  "local-environment setup" per `.claude/CLAUDE.md`'s agent table) — no app/backend source touched.
+- **Cost impact:** n/a ($0 — local tooling only, no cloud/architecture change, no cost-architect
+  ruling needed).
+- **Follow-up:** Not committed yet — awaiting explicit user go-ahead per standing rule, alongside
+  T-002.4/T-020 from earlier this session.
+
+### [2026-06-22 (close)] DECISION/DONE — T-021 revised twice: ANDROID_HOME scope fallback, then kill-and-restart-fresh semantics
+- **Actor:** manager → devops-engineer (two follow-up patches), manager ran the script directly each time
+- **Context:** Manager ran `scripts/start-dev.ps1` for real (user asked "run it and lets see"). First
+  run failed: `ANDROID_HOME`/`ANDROID_SDK_ROOT` were unset at process scope in the PowerShell tool's own
+  process even though correctly set at Windows User scope (`C:\Android\Sdk`) — confirmed via
+  `[Environment]::GetEnvironmentVariable(...,'User')` before touching the script. Second issue: after
+  that fix, the script's idempotent "skip if already running" design meant Flask/emulator were left
+  alone (already up from earlier in the session) — user watched this, didn't see the backend actually
+  start, and decided the *design itself* should change to kill-and-restart-fresh every run, not just fix
+  the symptom. Confirmed explicitly via `AskUserQuestion` (chose "kill and restart everything, including
+  the emulator" over "backend only," after being shown the ~30-40s emulator-reboot cost) plus a same-turn
+  "and emultors" follow-up.
+- **Action / Decision:**
+  1. **ANDROID_HOME fallback (patch 1):** script now checks Process scope first, then falls back to
+     `[Environment]::GetEnvironmentVariable('ANDROID_HOME'/'ANDROID_SDK_ROOT', 'User')` then `'Machine'`,
+     writing the resolved value into the current process's `$env:` for the rest of the run. Only throws
+     the loud failure if genuinely unset at all three scopes. Verified by clearing process-scope vars and
+     confirming fallback + by confirming the throw still fires when truly unset anywhere.
+  2. **Kill-and-restart-fresh (patch 2, design change, not a bug fix):** backend now always finds and
+     kills whatever's listening on port 8080 (`Get-NetTCPConnection -LocalPort 8080 -State Listen` →
+     `Stop-Process`, not just the script's own in-memory PID tracking — catches processes left over from
+     earlier/other runs too) before starting Flask fresh. Emulator now always kills any running
+     `emulator-XXXX` (`adb emu kill`), polls `adb devices` until it's actually gone (not fire-and-forget),
+     then always reboots `test_device` fresh through the existing boot-completed poll. `.venv` directory
+     creation deliberately stayed create-if-missing — "start everything fresh" was read as restarting the
+     *running processes*, not reinstalling pip packages on every run, which would be pure waste with no
+     user benefit; not re-litigated, just applied with reasoning stated.
+  3. Manager ran the script directly (not just trusting the agent's test) after both patches — first run
+     reproduced the exact `ANDROID_HOME` failure live, confirming the bug was real before delegating the
+     fix; final run after both patches showed the full kill→restart→reinstall→launch sequence end to end,
+     with explicit log lines confirming Flask and the emulator were actually killed and restarted (PID/serial
+     changed each time), `gradlew installDebug` BUILD SUCCESSFUL, app launched.
+- **Rationale:** The user's first real run surfaced two genuine gaps a desk-review wouldn't have caught:
+  an environment-variable-scope assumption that only breaks in certain process lineages, and a design
+  assumption (idempotent skip) that didn't match what "a reload script" actually meant to the person using
+  it. Both were root-caused from actual command output before any fix was attempted, per this project's
+  "read the logs/output before fault-finding" rule.
+- **Cost impact:** n/a ($0 — local tooling).
+- **Follow-up:** T-021 now reflects kill-and-restart-fresh as the real, current behavior (not the original
+  idempotent design) — `team/TASKS.md` updated to match. Still not committed; this is the 4th piece of
+  uncommitted work this session alongside T-002.4/T-020/the original T-021 build.
+
+### [2026-06-22 NOTE — Service never auto-starts: T-002 detection has no passive entry point]
+- **Actor:** manager
+- **Context:** User asked "are we at a point where I can put the app on my phone and we'll see
+  detection logs — will it actually detect?" before sideloading. Traced the real code path instead
+  of assuming the answer from the spec.
+- **Action / Decision:** Confirmed by grep that `TripTrackingForegroundService` is started in exactly
+  one place — `HomeStatusViewModel.onStartTripClicked()`, the manual "Start Trip" button — and
+  nowhere else (no boot receiver despite `RECEIVE_BOOT_COMPLETED` being declared, no app-launch
+  auto-start). `ActivityRecognitionRegistrar.register()` only runs inside that service's
+  `onStartCommand`, so the whole T-002 automatic-detection pipeline (just wired this session) cannot
+  fire until a trip is already manually started — at which point automatic detection has nothing
+  left to do. Also confirmed `SetupPermissionsScreen`/`ViewModel` (T-002.1) is an incomplete shell:
+  missing the `ACCESS_BACKGROUND_LOCATION` second-step request and never actually updates its
+  granted-permission UiState flags from the launcher result.
+- **Rationale:** Read the actual call graph before answering a yes/no detection question, per the
+  project's "read logs/sources before fault-finding" discipline — the spec assumed the service would
+  already be running and didn't address what starts it continuously.
+- **Cost impact:** n/a (finding only, no code changed yet).
+- **Follow-up:** logged on T-002's card in `team/TASKS.md`. Needs a decision: build a passive
+  "watching" start path (e.g. start the service at app launch or via a Settings toggle, idle until
+  an ENTER event) before sideloading will show real automatic detection. T-002.1's background-location
+  + granted-state gaps also need closing. Awaiting user direction on priority/scope.
+
+### [2026-06-22 DECISION — Passive-start scope for today: app-open auto-start only]
+- **Actor:** manager
+- **Context:** Follow-up to the previous NOTE (service never auto-starts). Presented 3 options
+  (auto-start+boot-receiver / auto-start-on-open-only / settings toggle) with the battery framing
+  from the T-002 spec's own §4 (Transition API registration is push-based/near-zero cost while idle;
+  the expensive 5s-poll only runs inside the bounded 30s confidence window, unaffected by how the
+  service starts).
+- **Action / Decision:** User chose to scope today to detection working at all, explicitly via
+  manually opening the app themselves — i.e. **auto-start on app open only**, no boot receiver, no
+  Settings toggle yet. User's own words: "today is all about detection — we can later make it so
+  its always on but sleeping, and wakes up on detection." That fuller architecture (wake from a dead
+  process via the Transition API's PendingIntent broadcast, starting the foreground service only on
+  actual detection rather than relying on it already being a live collector) is explicitly deferred,
+  not decided against — flagged as a real future redesign, not today's task.
+- **Rationale:** Matches the user's stated priority (working detection today) without over-building;
+  the deferred "sleeping, wakes on detection" model is architecturally different from a continuously
+  running foreground service (it would need the foreground service started directly from
+  `ActivityTransitionReceiver` on ENTER, not assumed already running to collect
+  `ConfidenceAcquisitionWindow.observeResults()`) and deserves its own design pass later, not a quiet
+  bolt-on now.
+- **Cost impact:** n/a ($0, on-device only).
+- **Follow-up:** android-engineer to wire app-open auto-start (start `TripTrackingForegroundService`
+  with no action from `MainActivity`/`Application.onCreate`) this session. T-002.1's background-
+  location + granted-state gaps still separately open. The boot-receiver / "wake from dead process"
+  redesign goes on the board as future scope when picked up, not now.
+
+### [2026-06-23 NOTE — First sideload field findings: permission prompt silent + misleading "Detected" label]
+- **Actor:** manager (relaying user's first real-device findings, not yet actioned per user request —
+  "don't fix it now, just make a note")
+- **Context:** User sideloaded the debug APK for the first time and tested setup before driving.
+  Reviewed the exported debug log (`mileage_tracker_debug_log_20260623_082837.txt`) together —
+  confirmed no crashes/errors, `MT-ActivityRecognition` registration succeeded cleanly, clean
+  teardown at the end. No `IN_VEHICLE` ENTER event yet (expected — this was desk testing, not a
+  drive).
+- **Finding 1 — permission prompt did not fire automatically.** `SetupPermissionsScreen`'s system
+  permission dialog (`ActivityResultContracts.RequestMultiplePermissions()`) did not appear when
+  expected; user had to grant all permissions manually via phone Settings instead. Root cause not
+  yet investigated. The repeated "Auto-starting detection service from app launch" lines (8x in
+  under 2 minutes) in the reviewed log are almost certainly a side effect of this — the user
+  repeatedly closing/reopening the app while working around the missing prompt, not a separate bug.
+- **Finding 2 — the new "Detected"/"Not detected" status indicator (added this session) is
+  mislabeled for manual starts.** It's bound to `uiState.inProgressTrip != null`, which is true for
+  BOTH an automatically-detected trip AND a manually-tapped "Start trip" trip — so tapping "Start
+  trip" yourself also shows "Detected," which is misleading since nothing was actually detected by
+  the ActivityRecognition pipeline in that case. User's own framing: manual start is "the user
+  override," and the indicator should distinguish that from real automatic detection — e.g. show
+  "Manual trip" instead of "Detected" when the user is the one who tapped Start. Not yet fixed.
+  Likely needs the `Trip` model (or at least in-memory state) to record which `TripStartEvent`
+  variant produced it, since today nothing persists that distinction past the moment of creation.
+- **Rationale:** User explicitly asked to log both for later, not fix immediately — wanted to go
+  test detection in the car first.
+- **Cost impact:** n/a.
+- **Follow-up:** Finding 1 → investigate under T-002.1 (permission screen). Finding 2 → small UI/data
+  fix riding with the status-indicator work (T-017 card) — likely needs a way to distinguish
+  manual vs. automatic trip origin, not just `inProgressTrip != null`. Neither actioned yet.
+
+### [2026-06-23 DONE — T-022 back-loop bug fixed: Home no longer re-traps Back into Classification]
+- **Actor:** android-engineer
+- **Context:** Logged on the T-022 card last session: `HomeStatusScreen`'s `LaunchedEffect`
+  re-fired the auto-navigation to `TripClassificationScreen` on every recomposition while the
+  in-progress trip stayed `PENDING_OCR` — which it does immediately after the user presses system
+  Back, since nothing resolved the trip. Net effect: Back popped to Home, Home instantly bounced
+  back to Classification, every single press — experienced as "Back is completely blocked."
+- **Action / Decision:** Added `HomeStatusUiState.autoRoutedToClassificationTripId` (tracked in
+  `HomeStatusViewModel` via a dedicated `MutableStateFlow`, merged into the existing
+  `combine(...)` that builds `uiState`). `HomeStatusScreen`'s `LaunchedEffect` now calls
+  `viewModel.onTripClassificationAutoRouted(tripId)` the first time it auto-navigates for a given
+  trip id, and gates the auto-navigate `if` on "not already auto-routed for this trip id" — so the
+  effect fires at most once per trip, not once per recomposition. Since the trip is still
+  genuinely un-classified after Back (by design — work trips needing a business reason before
+  export is a locked v1 fact, and a trip sitting in `PENDING_OCR` is already a tolerated state per
+  T-007's pending-Work-trip CSV exclusion), Home now also exposes
+  `HomeStatusUiState.showResumeClassificationAction` (true once auto-routed-but-still-pending) and
+  shows an explicit "Resume classification" button in place of Start/Stop — so the trip is never
+  silently stranded with no way back in to finish classifying it.
+- **Rationale:** Simplest correct fix per the brief's own framing (no new screen, no settings
+  toggle) — gates the existing one-shot intent rather than redesigning the navigation graph. The
+  manual "Resume classification" affordance was necessary, not optional: without it, backing out
+  once would have permanently stranded that trip (it can never self-resolve, and CSV export
+  already deliberately excludes it while un-classified per T-007).
+- **Verification:** Added `HomeStatusViewModelTest` (5 cases — gate-off-initially, gate-flips-true-
+  after-auto-route, a second/different trip is NOT treated as pre-routed, manual resume doesn't
+  itself mutate state, no-in-progress-trip is always ungated) plus a hand-written `FakeTripRepository`
+  (first ViewModel-layer fake in this codebase). First ViewModel test in the project to need
+  `Dispatchers.Main` — added `Dispatchers.setMain(StandardTestDispatcher())`/`resetMain()` via
+  `@Before`/`@After`, since `viewModelScope` resolves `Dispatchers.Main` and nothing installed it
+  before. `./gradlew clean test` → BUILD SUCCESSFUL, 31/31 tests pass on both debug and release
+  (was 26 before this session's 5 new tests).
+- **Cost impact:** n/a ($0, on-device only).
+- **Follow-up:** None outstanding for this bug. T-022's logging-design entry (below) documents the
+  audit trail that should make this class of bug visible from the log alone going forward.
+
+### [2026-06-23 DECISION — T-022 audit-logging tag scheme designed + reference-implemented in HomeStatusViewModel]
+- **Actor:** android-engineer
+- **Context:** T-018's `MT-*` Timber/file-logging convention covers only the service/data layer
+  (foreground service, ActivityRecognition, location, OCR, CSV export, Room writes) — zero
+  coverage of screen-level user actions (which button was pressed, what was typed, what got
+  read/written to the DB as a consequence). The back-loop bug above was diagnosed by reading
+  source, not by reading the log — exactly the gap T-022 exists to close.
+- **Action / Decision:** Two new tags, used uniformly across every ViewModel (not one tag per
+  screen): `MT-UI` for every user-initiated action (button click, committed field value,
+  ViewModel-made navigation decision), and `MT-Trip` for the DB read/write tied to that action —
+  with an explicit rule that if the actual write happens in a different layer (e.g. inside
+  `TripTrackingForegroundService`, not in the ViewModel that merely dispatched an `Intent`), the
+  `MT-Trip` line must say so and point at which existing tag (`MT-Service`/`MT-Repository`) picks
+  up the trail there, rather than implying a write happened where it didn't. Reference-implemented
+  in full in `HomeStatusViewModel` (Start/Stop trip clicks + the back-loop fix's auto-route/resume
+  actions) as the worked example. Full scheme, log-line shape, noise rule (log committed field
+  values, not every keystroke), and a line-by-line task list for `TripClassificationViewModel` /
+  `OdometerCaptureViewModel` written up in `team/blueprints/T-022-audit-logging-spec.md` for
+  `android-coder` to replicate mechanically — no design decisions left for the coder to make.
+- **Rationale:** Reusing T-018's existing tag/file/rotation machinery (no new logging
+  infrastructure needed) keeps this cheap; two tags (not one per screen) keeps the scheme
+  consistent and grep-friendly by message content rather than by an ever-growing tag list; the
+  explicit "say where the real write happens" rule keeps the trail honest given this app's
+  ViewModel/service boundary (T-001 blueprint §6.1) — several ViewModel actions only dispatch to
+  the foreground service rather than writing the DB themselves.
+- **Cost impact:** n/a ($0, on-device only).
+- **Follow-up:** Hand `team/blueprints/T-022-audit-logging-spec.md` to `android-coder` for
+  `TripClassificationViewModel`/`OdometerCaptureViewModel` (and the `SettingsViewModel`/
+  `ExportViewModel` completeness audit). T-022 card in `team/TASKS.md` updated to reflect the
+  back-loop fix as done and the logging design+reference-implementation as done, mechanical
+  rollout still open.
+
+### [2026-06-23 11:05] DONE — T-022 final review + end-to-end verification pass (android-engineer)
+- **Actor:** android-engineer
+- **Context:** `android-coder` mechanically applied the `MT-UI`/`MT-Trip` audit-logging convention
+  (per `team/blueprints/T-022-audit-logging-spec.md` §5.1-5.3) into `TripClassificationViewModel`,
+  `OdometerCaptureViewModel`, `SettingsViewModel`, `ExportViewModel`. Manager had already verified
+  `./gradlew test` green (31/31, debug+release, real JUnit XML) and spot-checked
+  `TripClassificationViewModel.kt`. This pass was the full diff review + the actual definition-of-done
+  check: can the entire user-action + DB-write trail be reconstructed from the exported debug log
+  alone, with zero source-reading.
+- **Action / Decision — diff review:** Read all four files in full against the spec line-by-line.
+  Every log line matches §5.1/§5.2 exactly (placement and message text, `%s`-style tripId
+  interpolation, manual-entry keystroke correctly skipped per the noise rule). §5.3's
+  `SettingsViewModel`/`ExportViewModel` additions cover every user-initiated action with no gaps:
+  `onPhotoRetentionToggled`, `onBluetoothVehicleTriggerToggled`, `onExportDebugLogClicked`,
+  `onExportRequested` all log on entry; the pre-existing `MT-Export` lines in `CsvFileWriter`/
+  `DebugLogFileProvider` were left untouched, not duplicated or relocated. No non-logging behavior
+  changed. No `Timber` call found in any `*Screen.kt` Composable (`HomeStatusScreen`,
+  `TripClassificationScreen`, `OdometerCaptureScreen`, `SettingsScreen`, `ExportScreen` all read in
+  full to confirm). No tag invented beyond `MT-UI`/`MT-Trip`. **Verdict: coder's diff was correct as
+  submitted — no fixes needed.** (`ExportScreen`'s and `HomeStatusScreen`'s plain navigation-only
+  buttons — Back, Trip history, Settings nav — correctly have no log line, since they're bare
+  callbacks with no ViewModel method and no DB interaction; not a gap.)
+- **Action / Decision — definition-of-done verification:** Used a **live emulator walkthrough**, not
+  a code-trace fallback, because `test_device` (API 34) was already running and `ANDROID_HOME` was
+  already configured — the stronger check specified in the task was achievable. Built
+  `./gradlew assembleDebug` (BUILD SUCCESSFUL), installed via `adb install -r`, granted runtime
+  permissions, then drove the UI via `adb shell input tap` + `uiautomator dump` (no Espresso harness
+  exists yet, so this was the available automation path): Start Trip → Stop Trip (auto-navigated to
+  Classification) → selected Work → typed business reason "ClientSiteVisit" → Save → Odometer
+  Capture manual entry "45231.5" → Confirm → landed back on Home with "Last trip: 0.0 km, WORK".
+  Also independently exercised `ExportScreen` (Export button → "Exported 3 trips to
+  mileage_trips_20260623_103101.csv") and `SettingsScreen` (both toggles + "Export debugging logs"
+  button, which itself succeeded). Then pulled the actual on-device debug log via
+  `adb shell run-as com.mileagetracker.app cat .../files/logs/mileage_tracker_log.txt` — **not**
+  `adb logcat`, since `FileLoggingTree` (T-018) is a deliberately file-only `Timber.Tree` that never
+  calls `Log.i`/`Log.d` to logcat, only `Log.e` on its own internal write-failure path; this was
+  confirmed by reading `FileLoggingTree.kt` before assuming logcat would show anything (read-logs-
+  before-fault-finding rule). The pulled log fully reconstructed the walkthrough with no source-
+  reading required: `MT-UI`/`MT-Trip` lines for every step, tripId threaded through all of them, and
+  the Home-dispatch lines honestly stating the real DB write happens inside
+  `TripTrackingForegroundService` (per the spec's "honest about the boundary" rule), not in the
+  ViewModel.
+- **Action / Decision — back-loop fix re-verification:** Re-ran the back-loop scenario live (not
+  just re-reading `HomeStatusViewModel.kt`/`HomeStatusScreen.kt` from earlier this session): started
+  a second trip, stopped it (auto-navigated to Classification), pressed system Back → landed on Home
+  and **stayed there** on a second UI dump after a pause (no auto-bounce-back), showing "Last trip
+  still needs classification" + "Resume classification" button; tapped it → correctly returned to
+  Classification for the same trip. The pulled log shows exactly one "auto-navigated to
+  TripClassification" line for that tripId followed later by one "Resume classification button
+  clicked" line for the same tripId, with no repeat auto-navigation line in between — log-only proof
+  the `autoRoutedToClassificationTripId` gate held.
+- **Rationale:** "Compiles and tests pass" was already confirmed by the Manager; this pass exists
+  specifically to test the actual product claim ("reconstructable from the log alone, no source-
+  reading") rather than just re-confirming the code looks right. A live walkthrough is strictly
+  stronger evidence than a code-trace for that claim, and was achievable here, so it was used instead
+  of the code-trace fallback.
+- **Cost impact:** n/a ($0, on-device/emulator only).
+- **Follow-up:** `team/TASKS.md` T-022 card updated with the close-out note (no-delete rule applied —
+  prior status lines retained). No commit/push performed this pass — awaiting explicit user
+  go-ahead per the standing rule before either.
+
+### [2026-06-23 09:10] DONE — T-003 trip-classification notification fire + lock-screen open + pending-nav UX
+- **Actor:** android-engineer
+- **Context:** T-003 had a built `TripAlertNotificationChannel` and a scaffolded
+  `TripClassificationNotificationBuilder` from T-001, but grepping the whole `app/src/main` tree
+  confirmed neither was ever called — the notification had literally never fired on a device, and
+  `MainActivity` never read its launch `Intent`, had no `onNewIntent`, and `MileageTrackerNavHost`
+  had no external entry point. Confirmed scope with the user first: single notification, fires on
+  trip STOP into PENDING_OCR, for every trip regardless of start method — this intentionally
+  supersedes the brief's literal "notify at START" wording; the already-tested classify-at-stop
+  architecture (HomeStatusScreen's in-app `LaunchedEffect` auto-route, the T-022 back-loop fix)
+  stays exactly as-is, not rearchitected.
+- **Action / Decision:**
+  1. Notification fire wired into the single shared `handleStopEvent` tail in
+     `TripTrackingForegroundService` (all 3 stop paths land here) — `notifyTripAwaitingClassification`
+     calls `NotificationManager.notify(tripId.hashCode(), tripClassificationNotificationBuilder.build(tripId))`
+     right after `tripRepository.updateStatus`. Deterministic id = `tripId.hashCode()`, matching the
+     builder's existing `PendingIntent` request-code convention, so re-stop/recovery never stacks a
+     duplicate notification for the same trip.
+  2. New nav seam: `PendingTripClassificationNavigationStore` (`@Singleton`, `MutableStateFlow<String?>`,
+     `setPendingTripId`/`consumePendingTripId`). `MainActivity.onCreate` + new `onNewIntent(Intent)`
+     override both extract `ACTION_OPEN_TRIP_CLASSIFICATION`/`EXTRA_TRIP_ID` and write into the
+     store; `MileageTrackerNavHost` takes the store as an optional constructor param, observes it via
+     `collectAsState()` inside `LaunchedEffect(pendingTripId)`, and calls `consumePendingTripId()`
+     (clearing it) *before* navigating — so the same tripId can never be navigated to twice, including
+     across a rotation (the store is Hilt-singleton-scoped and outlives the recreated Activity, but
+     the cleared/consumed state still blocks replay).
+  3. Lock-screen wake-and-open: `MainActivity.onCreate` calls `setShowWhenLocked(true)`/
+     `setTurnScreenOn(true)` programmatically as defense-in-depth alongside the manifest's existing
+     `android:showWhenLocked`/`turnScreenOn` attributes (already present, unused until now).
+     Deliberately did NOT add `setFullScreenIntent` — brief §5.2 only requires wake-**on-tap**, not an
+     unprompted heads-up popup over the lock screen (that's `CATEGORY_CALL`-style behavior the brief
+     never asked for), and `USE_FULL_SCREEN_INTENT` carries elevated-permission/OEM-revocation risk on
+     API 33+ that a tap-driven design avoids entirely. The brief's explicit fallback ("must still open
+     the app normally" if lock-screen interaction is disallowed) needs no extra code — it's Android's
+     own default behavior when a device's policy refuses `showWhenLocked`.
+  4. Added `PendingTripClassificationNavigationStoreTest` (7 cases, plain JUnit, no Android framework
+     dependency, no mocking framework per project convention).
+  5. MT-UI/MT-Trip logging: added (T-022 convention). `MainActivity` logs `MT-UI` on notification tap
+     (tripId) and on a malformed intent; `TripTrackingForegroundService.notifyTripAwaitingClassification`
+     logs `MT-Trip` (trip-stop → notification-posted) and `MT-Service` (`.e`) on `NotificationManager`
+     unavailability. T-022 itself didn't cover this because the notification never fired when T-022
+     was built — this is the first real coverage of the notification-fire/tap path.
+- **Rationale:** the deterministic-notification-id requirement directly prevents a real field bug
+  (duplicate stacked notifications across restart-recovery/re-stop); the singleton-store nav seam was
+  chosen over a `Channel`/`SharedFlow` specifically because it survives Activity recreation across
+  rotation correctly while still enforcing "consumed exactly once"; the full-screen-intent question
+  was resolved by re-reading brief §5.2's literal wording rather than assuming "lock-screen action"
+  implies an unprompted popup.
+- **Cost impact:** n/a ($0, on-device build/test only).
+- **Follow-up:** `team/TASKS.md` T-003 card updated with full design + verification detail (no-delete
+  rule applied). `./gradlew test` read via JUnit XML directly: debug 38/38 passed, release 38/38
+  passed (8 test classes each, 0 failures/errors). `./gradlew assembleDebug` also green, confirming
+  the Hilt graph resolves with the new `@Inject` sites. Not committed/pushed — awaiting explicit user
+  go-ahead per the standing rule.
+
+### [2026-06-23 09:30] NOTE — Standing reminder: debug/audit logging is mandatory on every new user-facing surface, not just T-018/T-022's original scope
+- **Actor:** manager
+- **Context:** user explicitly flagged mid-session, while T-003 was in flight, "please remember the
+  debugging logic — its important for field tests." T-003's android-engineer had already added
+  `MT-UI`/`MT-Trip` coverage for the new notification fire/tap path as part of the same change (see the
+  DONE entry directly above), so nothing was missed this time — but the user's wording ("remember") reads
+  as a standing instruction for future sessions, not just confirmation of this one.
+- **Action / Decision:** logging this explicitly as a standing convention so it is never assumed-covered
+  by default: **any new task that adds a user-facing surface (screen, button, notification, background
+  trigger) must extend the `MT-*` Timber/file-log convention (T-018's sink + T-022's interaction/
+  persistence trail) to cover it, as part of that task's own definition of done — not as a follow-up
+  task discovered later.** This is exactly why T-022 itself exists (the user's own framing: a field
+  tester hands back a log file, the Manager must be able to reconstruct what happened from it alone) —
+  T-003 is the first concrete proof the convention generalizes past its original T-018/T-022 surfaces.
+- **Rationale:** the project's hard deadline (working MVP by Friday) means field-test feedback has to be
+  diagnosable without a live debugging session each time — a feature that doesn't log itself is a feature
+  the Manager cannot debug from a tester's exported log.
+- **Cost impact:** n/a.
+- **Follow-up:** every future task card (T-004 onward) should be checked for this before being marked
+  Done — fold "does the new surface log via `MT-*`?" into the same review gate that already checks
+  `./gradlew test` counts.
+
+### [2026-06-23 11:15] DONE — T-002.1 Setup/Permissions screen finished (real grant tracking, two-step background location, NavHost first-run bug fixed, restricted-settings theory investigated)
+- **Actor:** android-engineer
+- **Context:** T-002's detection pipeline was already done/tested; T-002.1 (the Setup/Permissions
+  screen) was the one remaining piece, an incomplete shell per the 2026-06-22 gap-analysis entries
+  above (granted flags hardcoded `false`, no background-location second-step request, an unrelated
+  NavHost bug found fresh this session, and the field finding about the dialog never firing).
+- **Action / Decision:**
+  - **Two-step location request** (Android 10+/API 29+ requirement, not style): added
+    `SetupPermissionsPlanner` (`app/src/main/kotlin/.../ui/setup/SetupPermissionsPlanner.kt`) — a
+    pure Kotlin class (only depends on `Build.VERSION_CODES` ints) with three methods:
+    `firstRoundPermissionsToRequest(snapshot)`, `shouldRequestBackgroundLocation(snapshot)`, and
+    `isLimitedModeRequired(snapshot)`. `SetupPermissionsScreen` now requests fine/coarse
+    location+camera+activity-recognition(+notifications on 33+) in one `RequestMultiplePermissions()`
+    call, then — only if foreground location was actually granted and background isn't already
+    granted — fires a **second**, separate `RequestPermission()` call for
+    `ACCESS_BACKGROUND_LOCATION`. Bundling background location into the first call silently fails to
+    grant it on API 29+, which is exactly why it was never being granted before.
+  - **Real grant-state tracking:** `SetupPermissionsUiState`'s flags (fine/coarse/background
+    location, camera, activity recognition, notifications) are now updated from two sources: (1)
+    `SetupPermissionsViewModel.applyGrantSnapshot(PermissionGrantSnapshot)` called from both
+    launcher callbacks' actual `Map<String, Boolean>` results, and (2) the same method called from a
+    `LaunchedEffect(Unit)` on initial composition that reads real OS state via
+    `ContextCompat.checkSelfPermission` — so a returning user who granted everything via phone
+    Settings (the field-finding user's actual path) sees accurate state, not stale `false` defaults.
+  - **`isLimitedModeBannerVisible` rule:** re-read brief §8's exact locked wording rather than
+    guessing — "If the user disables background location **or** notification access, the app must
+    degrade gracefully." `SetupPermissionsPlanner.isLimitedModeRequired` implements precisely that:
+    true if background location OR notifications denied; camera denial alone does NOT trigger it
+    (camera only affects OCR capture, a separate T-005 manual-fallback concern).
+  - **NavHost first-run bug (found fresh this session, not previously on the board):**
+    `MileageTrackerNavHost`'s `NavHost(startDestination = Screen.SetupPermissions.route)` was
+    unconditional — every launch showed Setup again, even though `onSetupComplete()` already
+    persists `hasCompletedFirstRunSetup` and the screen's own doc calls itself one-time/first-run.
+    Fixed by adding `StartDestinationViewModel` (`ui/navigation/StartDestinationViewModel.kt`) —
+    reads `SettingsRepository.observeHasCompletedFirstRunSetup()`, maps to
+    `Screen.HomeStatus.route` or `Screen.SetupPermissions.route`, exposed as a `StateFlow<String?>`
+    with `null` meaning "not yet resolved." `NavHost.startDestination` can only be set once at first
+    composition and can't change on recomposition, so `MileageTrackerNavHost` now shows a brief
+    `CircularProgressIndicator` gate until the flag resolves past `null`, then composes the real
+    `NavHost` with the correct start route — no flash of the wrong screen.
+  - **Restricted-settings field finding — investigated, not assumed:** confirmed against Android's
+    actual documented behavior rather than trusting the working theory blindly. Android 13+
+    "restricted settings" specifically blocks Accessibility Service / Notification Listener / Device
+    Admin grant screens for apps installed by an untrusted source — it does **not** block the
+    ordinary `ActivityCompat.requestPermissions` dialog for standard dangerous permissions
+    (`ACCESS_FINE_LOCATION`, `CAMERA`, `ACTIVITY_RECOGNITION`, `POST_NOTIFICATIONS`). This app
+    requests none of the restricted-settings-gated permission types, so **the theory as stated does
+    not explain the field finding** — ruled out, not just unconfirmed. The actual, in-code-visible
+    explanation: the original shell only ever called `permissionLauncher.launch(...)` from the
+    Continue button's `onClick`, never automatically on screen composition — if the field tester
+    didn't tap Continue, or tapped it, denied once, and the OS later suppressed the dialog per its
+    own "don't ask again after repeated denial" policy on a relaunch, that alone reads as "the dialog
+    never fired" without any installer-level OS block being involved. Decision: kept the same
+    tap-driven flow (forcing an automatic dialog on composition would be bad UX and isn't how
+    Android's permission model is meant to be used) but added a permanently-visible in-app advisory
+    line on the Setup screen ("If a permission prompt does not appear after tapping Continue, open
+    phone Settings > Apps > Mileage Tracker > Permissions to grant it manually") as a safety net for
+    this and any other reason a dialog might not appear — cheap, always-correct fallback instructions
+    regardless of root cause.
+  - **Logging:** added `MT-UI`-tagged `Timber` logs (project's now-standing convention, see the NOTE
+    entry directly above) for: Continue tapped, every first-round permission's individual
+    grant/deny result, and the background-location second-step outcome.
+  - **Tests (hand-written fakes only, no mocking framework):** `SetupPermissionsPlannerTest` (14
+    cases — first-round permission list at various grant states and SDK levels, background-location
+    second-step gating including the below-API-29/already-granted/no-foreground-grant-yet cases,
+    and the limited-mode rule including the "camera alone doesn't count" case);
+    `SetupPermissionsViewModelTest` (5 cases, using a new hand-written `FakeSettingsRepository`);
+    `StartDestinationViewModelTest` (2 cases, same fake) proving the NavHost bug fix's resolution
+    logic. New `FakeSettingsRepository` added at
+    `app/src/test/kotlin/.../domain/repository/FakeSettingsRepository.kt` since none existed yet.
+- **Rationale:** every change traces to a confirmed gap (file read first, not assumed) or a
+  documented Android platform requirement (API 29+ background-location two-step), per project rule.
+- **Cost impact:** n/a ($0, on-device build/test only).
+- **Follow-up:** `team/TASKS.md` T-002 card updated. `./gradlew test` read via JUnit XML directly:
+  debug 59/59 passed, release 59/59 passed (11 test classes each, 0 failures/errors — the 3 new test
+  classes add 14+5+2=21 new cases on top of the prior 38). `./gradlew assembleDebug`: BUILD
+  SUCCESSFUL, confirms the Hilt graph resolves with the new `StartDestinationViewModel` `@Inject`
+  site. Not committed/pushed — awaiting explicit user go-ahead per the standing rule. T-002.5
+  (Bluetooth extended scope) remains parked/deferred, untouched by this chunk.
