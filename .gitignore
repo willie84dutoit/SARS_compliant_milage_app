@@ -53,6 +53,11 @@ Thumbs.db
 # ── Local dev tooling runtime state ─────────────────────
 scripts/.dev-pids.json
 
+# ── Project internals: local only, not for the public repo ──────────
+team/
+userstories/
+agile/
+
 # ── Claude Code: keep agents/skills/memory, ignore local overrides ──
 .claude/
 

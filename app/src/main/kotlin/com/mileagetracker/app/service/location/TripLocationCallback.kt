@@ -2,7 +2,7 @@ package com.mileagetracker.app.service.location
 
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationResult
-import com.mileagetracker.app.domain.location.HaversineDistanceCalculator
+import com.mileagetracker.app.domain.location.GpsAnchorTracker
 import kotlinx.coroutines.CancellationException
 import timber.log.Timber
 
@@ -12,6 +12,14 @@ import timber.log.Timber
  * noise floor (strictly below the 10m provider-level distance filter, so it does real filtering
  * work on top of it).
  *
+ * The anchor/noise-floor/exception-safety *decision* lives in [gpsAnchorTracker] (a pure,
+ * plain-JVM-testable class with no Android imports) — this class is reduced to the thin Android
+ * boundary: pulling lat/lng `Double`s out of the platform [android.location.Location] object,
+ * handing them to [gpsAnchorTracker], and translating its [GpsAnchorTracker.Outcome] back into
+ * [Listener] callbacks. See [gpsAnchorTracker]'s class doc for why this extraction was necessary
+ * (no `isReturnDefaultValues`, no Robolectric in this project — `Location` cannot be exercised in
+ * `app/src/test`).
+ *
  * This class does no I/O itself — it reports accepted distance deltas and the latest fix to its
  * [listener], which the foreground service owns (the service is responsible for flushing
  * distance to Room and resetting/observing the stop timers, per blueprint §1's
@@ -19,11 +27,8 @@ import timber.log.Timber
  */
 class TripLocationCallback(
     private val listener: Listener,
+    private val gpsAnchorTracker: GpsAnchorTracker = GpsAnchorTracker(),
 ) : LocationCallback() {
-
-    /** The last fix this callback *accepted* (i.e. moved the anchor) — null until the first fix arrives. */
-    private var lastAcceptedLatitude: Double? = null
-    private var lastAcceptedLongitude: Double? = null
 
     override fun onLocationResult(locationResult: LocationResult) {
         super.onLocationResult(locationResult)
@@ -31,51 +36,42 @@ class TripLocationCallback(
         val latestLocation = locationResult.lastLocation ?: return
         listener.onAnyLocationCallbackReceived()
 
-        val previousLatitude = lastAcceptedLatitude
-        val previousLongitude = lastAcceptedLongitude
-
-        if (previousLatitude == null || previousLongitude == null) {
-            // First fix of the trip: anchor immediately, no distance to add yet.
-            lastAcceptedLatitude = latestLocation.latitude
-            lastAcceptedLongitude = latestLocation.longitude
-            listener.onFirstFixAcquired(latestLocation.latitude, latestLocation.longitude)
-            return
-        }
-
         try {
-            val deltaMeters = HaversineDistanceCalculator.distanceInMeters(
-                startLatitude = previousLatitude,
-                startLongitude = previousLongitude,
-                endLatitude = latestLocation.latitude,
-                endLongitude = latestLocation.longitude,
-            )
+            when (
+                val outcome = gpsAnchorTracker.evaluateFix(
+                    latitude = latestLocation.latitude,
+                    longitude = latestLocation.longitude,
+                )
+            ) {
+                is GpsAnchorTracker.Outcome.FirstFix -> {
+                    listener.onFirstFixAcquired(outcome.latitude, outcome.longitude)
+                }
 
-            if (deltaMeters < GPS_NOISE_FLOOR_METERS) {
-                // T-004.3 (locked): below the 8.0m noise floor — discard, no distance added, anchor
-                // unchanged, inactivity timer not reset.
-                return
+                is GpsAnchorTracker.Outcome.AcceptedMovement -> {
+                    listener.onAcceptedMovement(
+                        deltaMeters = outcome.deltaMeters,
+                        latestLatitude = outcome.latestLatitude,
+                        latestLongitude = outcome.latestLongitude,
+                    )
+                }
+
+                is GpsAnchorTracker.Outcome.Discarded -> {
+                    // T-004.3 (locked): below the 8.0m noise floor — discard, no distance added,
+                    // anchor unchanged, inactivity timer not reset.
+                }
+
+                is GpsAnchorTracker.Outcome.ComputationFailed -> {
+                    Timber.tag("MT-Location").e(outcome.cause, "Failed to process location result")
+                }
             }
-
-            lastAcceptedLatitude = latestLocation.latitude
-            lastAcceptedLongitude = latestLocation.longitude
-            listener.onAcceptedMovement(
-                deltaMeters = deltaMeters,
-                latestLatitude = latestLocation.latitude,
-                latestLongitude = latestLocation.longitude,
-            )
         } catch (cancellationException: CancellationException) {
             throw cancellationException
-        } catch (haversineComputationFailure: Exception) {
-            Timber.tag("MT-Location").e(haversineComputationFailure, "Failed to process location result")
-            // Do not update lastAcceptedLatitude/lastAcceptedLongitude on failure; next fix will be
-            // compared against the last known-good point.
         }
     }
 
     /** Resets the anchor so the next fix is always treated as a first fix (e.g. on a new trip). */
     fun reset() {
-        lastAcceptedLatitude = null
-        lastAcceptedLongitude = null
+        gpsAnchorTracker.reset()
     }
 
     interface Listener {
@@ -87,10 +83,5 @@ class TripLocationCallback(
 
         /** Fired when a fix clears the 8m noise floor — feeds distance accumulation and resets the 3-minute inactivity timer. */
         fun onAcceptedMovement(deltaMeters: Double, latestLatitude: Double, latestLongitude: Double)
-    }
-
-    private companion object {
-        /** T-004.3 locked value: strictly below the 10m provider filter, above stationary GPS drift. */
-        const val GPS_NOISE_FLOOR_METERS = 8.0
     }
 }

@@ -57,6 +57,18 @@ android {
         }
     }
 
+    // T-005.1: returnDefaultValues = true lets Android stub classes (e.g. android.graphics.Bitmap)
+    // return null/0/false instead of throwing RuntimeException("Stub!") in plain JVM unit tests.
+    // This is safe here because (a) only test code sees the stubs and (b) the ViewModel tests that
+    // touch Bitmap pass it as a "don't-care" reference through to a FakeOdometerOcrClient that
+    // never dereferences it — so getting a null back from Bitmap.createBitmap() or a no-op from
+    // other Android stubs is the correct behaviour for JVM tests.
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
+
     // T-001 build-order step 2/3: domain + data layers carry the unit/instrumented test source
     // sets listed in the blueprint's package tree.
     sourceSets {

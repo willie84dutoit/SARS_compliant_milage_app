@@ -1,5 +1,6 @@
 package com.mileagetracker.app.ui.odometer
 
+import android.graphics.Bitmap
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -19,17 +20,26 @@ import timber.log.Timber
 import javax.inject.Inject
 
 /**
- * T-001 blueprint §5, row 4: CameraX preview/capture state, OCR-in-progress flag, OCR result,
- * manual-entry fallback text. This is a SHELL for T-001 — the real CameraX wiring and the
- * OCR-result branching (confident/low-confidence/no-text -> exact UI state + whether the photo
- * is persisted per the retention rule) is finished in T-005 coordinating with ml-ocr-specialist,
- * per the blueprint §6 delegation split (kept with android-engineer, not handed to the coder).
+ * T-001 blueprint §5, row 4 / T-005.1: CameraX preview/capture state, OCR-in-progress flag,
+ * OCR result, manual-entry fallback text, and the captured image URI used when the user confirms
+ * an OCR result.
+ *
+ * [capturedImageUri] is populated in [captureAndRunOcr] and consumed by [onConfirmOcrResult] so
+ * the photo-retention path always has the correct URI regardless of which confirm button the user
+ * taps.
  */
 data class OdometerCaptureUiState(
     val isCaptureInProgress: Boolean = false,
     val isOcrInProgress: Boolean = false,
     val ocrResult: OdometerOcrResult? = null,
     val manualEntryText: String = "",
+    val capturedImageUri: String? = null,
+    /**
+     * Loaded from [Trip.photoRetention] in [OdometerCaptureViewModel.init]. Defaults to SAVED so
+     * that any race where the trip loads after the user somehow confirms is safe (SAVED is the
+     * conservative, non-destructive default — the photo is kept rather than deleted prematurely).
+     */
+    val photoRetentionMode: PhotoRetentionMode = PhotoRetentionMode.SAVED,
 )
 
 @HiltViewModel
@@ -46,8 +56,95 @@ class OdometerCaptureViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(OdometerCaptureUiState())
     val uiState: StateFlow<OdometerCaptureUiState> = _uiState.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            val tripPhotoRetention = tripRepository.getTripById(tripId)?.photoRetention
+            if (tripPhotoRetention != null) {
+                _uiState.value = _uiState.value.copy(photoRetentionMode = tripPhotoRetention)
+            }
+        }
+    }
+
     fun onManualEntryChanged(newText: String) {
         _uiState.value = _uiState.value.copy(manualEntryText = newText)
+    }
+
+    /**
+     * Resets the OCR result so the camera preview is shown again (user tapped "Retake").
+     * Also clears the captured image URI so a stale URI cannot be accidentally confirmed.
+     */
+    fun onRetakePhoto() {
+        Timber.tag("MT-UI").i("OdometerCaptureScreen: Retake tapped for tripId=%s", tripId)
+        _uiState.value = _uiState.value.copy(
+            ocrResult = null,
+            capturedImageUri = null,
+            manualEntryText = "",
+        )
+    }
+
+    /**
+     * T-005.1: receives the bitmap captured by CameraX (already rotated to upright by the caller),
+     * runs the ML Kit OCR pipeline via [odometerOcrClient], and updates [uiState] with the result.
+     *
+     * [photoRetentionMode] is read from [Trip.photoRetention] — the retention mode is stored on the
+     * trip entity at creation time so that a later Settings change never reinterprets captured
+     * photos for existing trips. The caller (OdometerCaptureScreen) reads it from the trip loaded
+     * in the ViewModel rather than from a live SettingsRepository observation, keeping the
+     * retention decision stable for the lifetime of this capture session.
+     *
+     * Null-trip fallback: if [TripRepository.getTripById] returns null (e.g. a concurrent delete
+     * that should never happen in normal flow), [startOdometerKm] defaults to 0.0 so OCR still
+     * runs and the user can confirm a manual value. This is a graceful-degradation path, not a
+     * correctness guarantee.
+     */
+    fun captureAndRunOcr(
+        capturedBitmap: Bitmap?,
+        imageUri: String,
+        photoRetentionMode: PhotoRetentionMode,
+    ) {
+        Timber.tag("MT-UI").i(
+            "OdometerCaptureScreen: Capture button tapped tripId=%s, imageUri=%s, retention=%s",
+            tripId,
+            imageUri,
+            photoRetentionMode,
+        )
+        _uiState.value = _uiState.value.copy(
+            isOcrInProgress = true,
+            capturedImageUri = imageUri,
+        )
+        viewModelScope.launch {
+            val startOdometerKm = tripRepository.getTripById(tripId)?.startOdometerKm ?: run {
+                Timber.tag("MT-OCR").w(
+                    "captureAndRunOcr: trip not found for tripId=%s; defaulting startOdometerKm=0.0",
+                    tripId,
+                )
+                0.0
+            }
+            val ocrResult = odometerOcrClient.recognizeText(capturedBitmap, startOdometerKm)
+
+            val resultLogLabel = when (ocrResult) {
+                is OdometerOcrResult.Confident -> "Confident(valueKm=${ocrResult.valueKm}, confidence=${ocrResult.confidencePercent}%)"
+                is OdometerOcrResult.LowConfidence -> "LowConfidence(bestGuess=${ocrResult.bestGuessValueKm}, confidence=${ocrResult.confidencePercent}%)"
+                OdometerOcrResult.NoTextFound -> "NoTextFound"
+            }
+            Timber.tag("MT-OCR").i(
+                "OdometerCaptureScreen: OCR result for tripId=%s: %s",
+                tripId,
+                resultLogLabel,
+            )
+
+            val prefillText = if (ocrResult is OdometerOcrResult.LowConfidence) {
+                ocrResult.bestGuessValueKm?.toString() ?: ""
+            } else {
+                _uiState.value.manualEntryText
+            }
+
+            _uiState.value = _uiState.value.copy(
+                isOcrInProgress = false,
+                ocrResult = ocrResult,
+                manualEntryText = prefillText,
+            )
+        }
     }
 
     /**

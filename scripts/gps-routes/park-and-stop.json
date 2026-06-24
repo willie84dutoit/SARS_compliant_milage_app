@@ -1,0 +1,13 @@
+{
+  "scenario": "brief-section-10-scenario-3-control-case",
+  "name": "park-and-stop",
+  "notes": "Control case proving the harness can detect a REAL stop, not just prove it avoids false positives (this is the counterpart to stop-start-traffic.json's near-miss). Normal movement for the first 4 waypoints (25-45m apart, 15s apart - same profile as normal-trip.json, all Outcome.AcceptedMovement, each one resetting the 3-minute CONFIRMED_INACTIVITY_TIMEOUT_MILLIS timer in TripTrackingForegroundService.kt). Then the car parks at wp05 and wp06 sits at the EXACT SAME coordinate as wp05 with delaySecondsAfterPrevious = 200s (3m20s) - deliberately past the 180s/3min CONFIRMED_INACTIVITY_TIMEOUT_MILLIS threshold, with a 20s margin so emulator/adb injection latency or scheduler jitter cannot accidentally land it under the line. Because GpsAnchorTracker.kt discards a same-coordinate fix as Outcome.Discarded (delta 0.0m, well below the 8.0m GPS_NOISE_FLOOR_METERS), resetInactivityTimer() is never called again after wp05's accepted fix, so the inactivity timer that started at wp05 is expected to fire at the 180s mark, well before wp06's fix is even injected at the 200s mark. Expected result: TripStopEvent.ConfirmedInactivity fires and the service transitions the trip to PENDING_OCR via handleStopEvent - this is the one fixture in this set where a stop notification SHOULD appear. No wp07 'resume' point is included on purpose: this fixture's whole point is the trip ending here, not resuming.",
+  "waypoints": [
+    { "label": "wp01-start",            "latitude": -33.928500, "longitude": 18.487500, "delaySecondsAfterPrevious": 0   },
+    { "label": "wp02",                  "latitude": -33.928220, "longitude": 18.487650, "delaySecondsAfterPrevious": 15  },
+    { "label": "wp03",                  "latitude": -33.927930, "longitude": 18.487810, "delaySecondsAfterPrevious": 15  },
+    { "label": "wp04-approaching-park",  "latitude": -33.927640, "longitude": 18.487970, "delaySecondsAfterPrevious": 15  },
+    { "label": "wp05-parked",           "latitude": -33.927340, "longitude": 18.488140, "delaySecondsAfterPrevious": 15  },
+    { "label": "wp06-still-parked-200s","latitude": -33.927340, "longitude": 18.488140, "delaySecondsAfterPrevious": 200 }
+  ]
+}

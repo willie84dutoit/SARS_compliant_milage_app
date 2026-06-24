@@ -1,0 +1,17 @@
+{
+  "scenario": "brief-section-10-scenario-2",
+  "name": "stop-start-traffic",
+  "notes": "See stop-start-traffic.md in this directory for the full timing breakdown and why the pause must NOT trigger CONFIRMED_INACTIVITY_TIMEOUT_MILLIS (180s) in TripTrackingForegroundService.kt.",
+  "waypoints": [
+    { "label": "wp01-start",        "latitude": -33.928500, "longitude": 18.487500, "delaySecondsAfterPrevious": 0  },
+    { "label": "wp02-approach",     "latitude": -33.928220, "longitude": 18.487650, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp03-approach",     "latitude": -33.927930, "longitude": 18.487810, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp04-redlight-stop","latitude": -33.927640, "longitude": 18.487970, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp05-still-stopped","latitude": -33.927640, "longitude": 18.487970, "delaySecondsAfterPrevious": 130 },
+    { "label": "wp06-resume",       "latitude": -33.927340, "longitude": 18.488140, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp07-resume",       "latitude": -33.927030, "longitude": 18.488320, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp08-resume",       "latitude": -33.926710, "longitude": 18.488510, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp09-resume",       "latitude": -33.926380, "longitude": 18.488700, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp10-end",          "latitude": -33.926040, "longitude": 18.488900, "delaySecondsAfterPrevious": 15 }
+  ]
+}

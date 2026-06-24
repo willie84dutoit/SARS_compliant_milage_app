@@ -1,0 +1,19 @@
+{
+  "scenario": "brief-section-10-scenario-1",
+  "name": "normal-trip",
+  "notes": "Uninterrupted trip, brief §10 scenario #1. Every consecutive waypoint pair is 25-45m apart (well clear of GpsAnchorTracker's 8.0m noise floor in GpsAnchorTracker.kt), spaced 15s apart, so every fix should land as Outcome.AcceptedMovement and reset CONFIRMED_INACTIVITY_TIMEOUT_MILLIS (3 min) in TripTrackingForegroundService.kt on every single fix. Total elapsed time across all 12 waypoints is 11 x 15s = 165s (2m45s) of continuous simulated driving with zero stalls. Expected result: trip never approaches either stop timer; distanceKm accumulates monotonically; no ConfirmedInactivity or UnstableSignalTimeout stop event should ever fire during this fixture. Route is a straight-line walk up a realistic-looking Cape Town N1-corridor latitude/longitude grid - coordinates are illustrative, not a surveyed road.",
+  "waypoints": [
+    { "label": "wp01-start",  "latitude": -33.928500, "longitude": 18.487500, "delaySecondsAfterPrevious": 0  },
+    { "label": "wp02",        "latitude": -33.928220, "longitude": 18.487650, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp03",        "latitude": -33.927930, "longitude": 18.487810, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp04",        "latitude": -33.927640, "longitude": 18.487970, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp05",        "latitude": -33.927340, "longitude": 18.488140, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp06",        "latitude": -33.927030, "longitude": 18.488320, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp07",        "latitude": -33.926710, "longitude": 18.488510, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp08",        "latitude": -33.926380, "longitude": 18.488700, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp09",        "latitude": -33.926040, "longitude": 18.488900, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp10",        "latitude": -33.925690, "longitude": 18.489110, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp11",        "latitude": -33.925330, "longitude": 18.489330, "delaySecondsAfterPrevious": 15 },
+    { "label": "wp12-end",    "latitude": -33.924960, "longitude": 18.489560, "delaySecondsAfterPrevious": 15 }
+  ]
+}
