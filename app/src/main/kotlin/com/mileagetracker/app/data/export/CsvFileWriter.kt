@@ -14,6 +14,8 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
+/** Implementation of [CsvWriter] — the only production handler. */
+
 /**
  * Result of a [CsvFileWriter.writeToDownloads] call — a result type, not an exception, so the
  * caller (here, `ExportViewModel`) can render a failure as UI state instead of needing its own
@@ -34,7 +36,7 @@ sealed interface CsvWriteResult {
  */
 class CsvFileWriter @Inject constructor(
     @ApplicationContext private val appContext: Context,
-) {
+) : CsvWriter {
 
     private val filenameTimestampFormat = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
 
@@ -50,7 +52,7 @@ class CsvFileWriter @Inject constructor(
      * contract (cancelling export, e.g. leaving the Export screen, must not be reported as a
      * write failure).
      */
-    fun writeToDownloads(rows: List<CsvRow>): CsvWriteResult {
+    override fun writeToDownloads(rows: List<CsvRow>): CsvWriteResult {
         val filename = "mileage_trips_${filenameTimestampFormat.format(Date())}.csv"
         return try {
             val csvContent = buildCsvContent(rows)
@@ -81,7 +83,7 @@ class CsvFileWriter @Inject constructor(
         }
     }
 
-    private fun buildCsvContent(rows: List<CsvRow>): String {
+    internal fun buildCsvContent(rows: List<CsvRow>): String {
         val builder = StringBuilder()
         builder.append(CsvRow.HEADER.joinToString(separator = ",")).append('\n')
         rows.forEach { row ->
@@ -97,6 +99,10 @@ class CsvFileWriter @Inject constructor(
                     row.distanceKm.toString(),
                     escapeCsvField(row.businessReason.orEmpty()),
                     row.status,
+                    // T-007.6: SAST human-readable columns appended at end (indices 10, 11).
+                    // Values are pre-formatted by CsvExportRules.buildExportRows; no formatting here.
+                    row.startDateTime,
+                    row.endDateTime,
                 ).joinToString(separator = ","),
             ).append('\n')
         }

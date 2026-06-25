@@ -34,7 +34,12 @@ class TripClassificationNotificationBuilder @Inject constructor(
     @ApplicationContext private val appContext: Context,
 ) {
 
-    fun build(tripId: String): Notification {
+    /**
+     * H-2 fix: [isManualStart] drives the notification title. A manually started trip was not
+     * "detected" — calling it so is misleading. The body text is identical for both origins
+     * because the action (classify the trip) is the same.
+     */
+    fun build(tripId: String, isManualStart: Boolean = false): Notification {
         val openClassificationIntent = Intent(appContext, MainActivity::class.java).apply {
             action = ACTION_OPEN_TRIP_CLASSIFICATION
             putExtra(EXTRA_TRIP_ID, tripId)
@@ -48,8 +53,10 @@ class TripClassificationNotificationBuilder @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+        val notificationTitle = if (isManualStart) "Trip recorded" else "Trip detected"
+
         return NotificationCompat.Builder(appContext, TripAlertNotificationChannel.CHANNEL_ID)
-            .setContentTitle("Trip detected")
+            .setContentTitle(notificationTitle)
             .setContentText("Tap to classify this trip as Work or Private")
             .setSmallIcon(R.drawable.ic_notification_trip)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

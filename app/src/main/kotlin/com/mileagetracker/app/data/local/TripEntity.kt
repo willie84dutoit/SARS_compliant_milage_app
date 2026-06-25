@@ -80,4 +80,26 @@ data class TripEntity(
 
     @ColumnInfo(name = "signing_key_id")
     val signingKeyId: String?,
+
+    /**
+     * Monotonic sequence counter assigned at signing time (Migration 1→2). Value is computed as
+     * COUNT(trips WHERE status IN ('completed','pending_business_reason')) + 1 at the moment of
+     * signing, capturing finalization order across all trips that have passed the stop event.
+     * Default 0 in the migration covers existing rows that were never signed. Phase-2 backend
+     * uses gaps in this counter to detect tail-truncation — not detectable locally by design (see
+     * LOGS.md [2026-06-18 17:10] "Known, documented limitation").
+     */
+    @ColumnInfo(name = "trip_sequence_number", defaultValue = "0")
+    val tripSequenceNumber: Int,
+
+    /**
+     * H-1/H-2 fix (Migration 2→3): true when this trip was started by the user tapping Start
+     * (ManualStart event), false when it was detected automatically via ActivityRecognition.
+     * Default false in the migration covers existing rows that were inserted before this column
+     * existed — those trips were started in a debug session and the "detected" label is
+     * acceptable for them. Used by Home banner and the classification notification to show
+     * "Trip active (manual)" vs "Trip detected" respectively.
+     */
+    @ColumnInfo(name = "is_manual_start", defaultValue = "0")
+    val isManualStart: Boolean,
 )

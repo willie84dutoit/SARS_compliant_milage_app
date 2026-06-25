@@ -61,3 +61,13 @@ agile/
 # ── Claude Code: keep agents/skills/memory, ignore local overrides ──
 .claude/
 
+# ── OCR-accuracy spike tooling (local only — stock-image licensing + repo bloat) ──
+# Reusable scripts (download_odometers.py, confirm_readings.py) ARE committed; the
+# downloaded images, generated data, and the spike instrumented test stay local.
+tools/ocr-test/odometer_images/
+tools/ocr-test/readings.csv
+tools/ocr-test/confirmations.csv
+tools/ocr-test/report.md
+app/src/androidTest/assets/odometer_photos/
+app/src/androidTest/kotlin/com/mileagetracker/app/ocr/OdometerOcrBatchTest.kt
+

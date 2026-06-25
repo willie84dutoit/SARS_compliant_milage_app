@@ -5,8 +5,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Scaffold
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -14,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.mileagetracker.app.ui.common.MileageTrackerScaffold
 
 /** Trip History screen shell (brief §7 #5). */
 @Composable
@@ -23,9 +26,24 @@ fun TripHistoryScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    Scaffold { contentPadding ->
+    MileageTrackerScaffold(
+        screenTitle = "Trip History",
+        navigationIconContent = {
+            IconButton(onClick = onNavigateBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+        },
+    ) { contentPadding ->
         Column(modifier = Modifier.padding(contentPadding).fillMaxSize().padding(24.dp)) {
-            Button(onClick = onNavigateBack) { Text("Back") }
+            // M-2 fix: PENDING_OCR trips are now visible in History.
+            if (uiState.pendingOcrTrips.isNotEmpty()) {
+                Text("Awaiting odometer/classification (${uiState.pendingOcrTrips.size})")
+                LazyColumn {
+                    items(uiState.pendingOcrTrips) { trip ->
+                        Text("PENDING OCR: ${trip.id} — ${trip.distanceKm} km")
+                    }
+                }
+            }
 
             if (uiState.pendingBusinessReasonTrips.isNotEmpty()) {
                 Text("Pending business reason (${uiState.pendingBusinessReasonTrips.size})")

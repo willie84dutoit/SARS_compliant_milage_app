@@ -79,4 +79,46 @@ interface TripDao {
 
     @Delete
     suspend fun deleteTrip(trip: TripEntity)
+
+    // --- T-008 signing queries -------------------------------------------------------------------
+
+    /**
+     * Counts all trips that have passed the stop-event (completed or pending_business_reason).
+     * Used to assign [TripEntity.tripSequenceNumber] at signing time — the new trip's sequence
+     * number is this count + 1, capturing finalization order.
+     */
+    @Query(
+        "SELECT COUNT(*) FROM trips WHERE status IN ('completed', 'pending_business_reason')",
+    )
+    suspend fun countFinalizedTrips(): Int
+
+    /**
+     * Returns the most recently signed trip (non-null signatureBase64, ordered by
+     * tripSequenceNumber descending). Used by the cold-start tail-hash self-heal to recompute
+     * the DataStore cache from Room (the durability anchor per the T-008 decision).
+     */
+    @Query(
+        "SELECT * FROM trips WHERE signature_base64 IS NOT NULL " +
+            "ORDER BY trip_sequence_number DESC LIMIT 1",
+    )
+    suspend fun getMostRecentlySignedTrip(): TripEntity?
+
+    /**
+     * Writes the signing columns and tripSequenceNumber to an existing trip row in a single UPDATE,
+     * called from [TripSigningOrchestrator] immediately before [markTripCompleted] writes the final
+     * status. Separating the two updates (sign first, then flip status) keeps the Room write the
+     * durability anchor: a crash between the two leaves the trip unsigned-but-still-pending, which
+     * the self-heal can recover from on next cold start.
+     */
+    @Query(
+        "UPDATE trips SET signature_base64 = :signatureBase64, signing_key_id = :signingKeyId, " +
+            "trip_sequence_number = :tripSequenceNumber, updated_at = :updatedAt WHERE id = :tripId",
+    )
+    suspend fun updateSigningFields(
+        tripId: String,
+        signatureBase64: String,
+        signingKeyId: String,
+        tripSequenceNumber: Int,
+        updatedAt: Long,
+    )
 }

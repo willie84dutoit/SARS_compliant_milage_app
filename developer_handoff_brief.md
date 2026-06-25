@@ -107,7 +107,9 @@ This stack is preferred because it is native, fast to implement, and suitable fo
   - business reason (required when classification is `Work`)
 - Export destination for v1: the Android Downloads folder.
 - CSV file naming for v1: `mileage_trips_YYYYMMDD_HHMMSS.csv`.
-- CSV format for v1: UTF-8 plain text, comma-separated columns in this fixed order: `tripId,classification,startTimestamp,endTimestamp,startOdometerKm,endOdometerKm,verifiedOdometerKm,distanceKm,businessReason,status`.
+- ~~CSV format for v1: UTF-8 plain text, comma-separated columns in this fixed order: `tripId,classification,startTimestamp,endTimestamp,startOdometerKm,endOdometerKm,verifiedOdometerKm,distanceKm,businessReason,status`.~~
+  <!-- AMENDED 2026-06-25 (session 16, user-directed): appended startDateTime,endDateTime (SAST) after status. -->
+- CSV format for v1: UTF-8 plain text, comma-separated columns in this fixed order: `tripId,classification,startTimestamp,endTimestamp,startOdometerKm,endOdometerKm,verifiedOdometerKm,distanceKm,businessReason,status,startDateTime,endDateTime`. The two trailing columns `startDateTime`/`endDateTime` are the millis timestamps formatted `yyyy-MM-dd HH:mm:ss` in `Africa/Johannesburg` (SAST), produced at export time only (stored values stay epoch-millis).
 - Export rules for v1: export only completed trips; pending or incomplete trips are excluded; the export must overwrite any existing file with the same timestamped name and must not include blank business reasons for `Work` trips.
 
 ### 5.7 Default MVP Rules to Lock In

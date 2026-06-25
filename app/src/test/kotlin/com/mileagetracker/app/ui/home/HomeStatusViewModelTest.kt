@@ -10,6 +10,7 @@ import com.mileagetracker.app.domain.repository.FakeTripRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -22,20 +23,16 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * T-022 back-loop-fix regression coverage (team/TASKS.md T-022 card): proves the auto-navigation
- * to Trip Classification fires at most once per trip id, and that the manual "Resume
- * classification" affordance becomes available afterwards instead of silently stranding the trip.
+ * T-022 back-loop-fix regression coverage: proves the auto-navigation to Trip Classification fires
+ * at most once per trip id, and the "Resume classification" affordance becomes available afterwards.
  *
- * [HomeStatusViewModel] is constructed with a bare [ContextWrapper] wrapping a null base — its
- * constructor only stores the reference, and this test never calls [HomeStatusViewModel.onStartTripClicked]
- * or [HomeStatusViewModel.onStopTripClicked] (the two methods that actually touch the Android
- * platform via `Intent`/`ContextCompat.startForegroundService`), so no real framework call is made.
- * This project has no Robolectric/instrumented unit-test setup (see `app/build.gradle.kts`), so
- * this is the narrowest safe way to exercise the pure `uiState`-gating logic on the JVM.
+ * C-2 tests removed: isPendingOdometerCapture, onClassificationSavedNavigatingToOdometer,
+ * and onResumeOdometerClicked no longer exist — the two-screen gap they guarded was eliminated
+ * when classification and odometer were merged into one screen.
  *
- * [HomeStatusViewModel.uiState] is built with `viewModelScope`, which resolves `Dispatchers.Main`
- * internally — this is the first ViewModel test in this codebase to need it, so [setUpMainDispatcher]
- * installs a [StandardTestDispatcher] as `Dispatchers.Main` for the duration of each test.
+ * [HomeStatusViewModel] is constructed with a bare [ContextWrapper] wrapping a null base — the
+ * constructor only stores the reference and tests never call onStartTripClicked/onStopTripClicked
+ * (which touch the Android platform via Intent/ContextCompat.startForegroundService).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeStatusViewModelTest {
@@ -73,6 +70,8 @@ class HomeStatusViewModelTest {
         updatedAt = 0L,
         signatureBase64 = null,
         signingKeyId = null,
+        tripSequenceNumber = 0,
+        isManualStart = false,
     )
 
     @Test
@@ -116,8 +115,6 @@ class HomeStatusViewModelTest {
             viewModel.onTripClassificationAutoRouted(tripId = "trip-1")
             awaitItem() // trip-1 now auto-routed
 
-            // A brand-new trip (e.g. trip-1 completed and a new trip started+stopped) reaches
-            // PENDING_OCR. It must not inherit trip-1's "already auto-routed" gate.
             fakeTripRepository.setInProgressTrip(buildPendingOcrTrip(tripId = "trip-2"))
 
             val stateForNewTrip = awaitItem()
@@ -127,7 +124,7 @@ class HomeStatusViewModelTest {
     }
 
     @Test
-    fun `onResumeClassificationClicked does not itself mutate state (manual nav callback owns navigation)`() = runTest {
+    fun `onResumeClassificationClicked does not itself mutate state (nav callback owns navigation)`() = runTest {
         val fakeTripRepository = FakeTripRepository()
         fakeTripRepository.setInProgressTrip(buildPendingOcrTrip(tripId = "trip-1"))
         val viewModel = HomeStatusViewModel(appContext = inertContext, tripRepository = fakeTripRepository)
@@ -151,6 +148,28 @@ class HomeStatusViewModelTest {
             val initialState = awaitItem()
             assertNull(initialState.inProgressTrip)
             assertFalse(initialState.showResumeClassificationAction)
+        }
+    }
+
+    // H-1 fix test
+
+    @Test
+    fun `isManualStart on inProgressTrip is correctly reflected in uiState`() = runTest {
+        val fakeTripRepository = FakeTripRepository()
+        val manualTrip = buildPendingOcrTrip(tripId = "trip-1").copy(
+            status = TripStatus.ACTIVE,
+            isManualStart = true,
+        )
+        fakeTripRepository.setInProgressTrip(manualTrip)
+        val viewModel = HomeStatusViewModel(appContext = inertContext, tripRepository = fakeTripRepository)
+
+        viewModel.uiState.test {
+            advanceUntilIdle()
+            val state = expectMostRecentItem()
+            assertTrue(
+                "inProgressTrip.isManualStart should be true for a manually started trip",
+                state.inProgressTrip?.isManualStart == true,
+            )
         }
     }
 }

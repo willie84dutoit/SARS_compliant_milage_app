@@ -92,15 +92,39 @@ class TripRepositoryImpl @Inject constructor(
             Timber.tag("MT-Repository").e("markTripCompleted called for unknown tripId=%s", tripId)
             throw IllegalStateException("markTripCompleted called for unknown tripId=$tripId")
         }
+        // Empty strings from TripSigningOrchestrator.finalizeWithoutSignature() map to null
+        // in the DB — preserves a uniform interface while keeping null semantics in the schema.
+        val storedSignatureBase64 = signatureBase64.ifEmpty { null }
+        val storedSigningKeyId = signingKeyId.ifEmpty { null }
         tripDao.updateTrip(
             existingTrip.copy(
                 status = TripStatus.COMPLETED,
-                signatureBase64 = signatureBase64,
-                signingKeyId = signingKeyId,
+                signatureBase64 = storedSignatureBase64,
+                signingKeyId = storedSigningKeyId,
                 updatedAt = System.currentTimeMillis(),
             ),
         )
     }
+
+    override suspend fun updateSigningFields(
+        tripId: String,
+        signatureBase64: String,
+        signingKeyId: String,
+        tripSequenceNumber: Int,
+    ) {
+        tripDao.updateSigningFields(
+            tripId = tripId,
+            signatureBase64 = signatureBase64,
+            signingKeyId = signingKeyId,
+            tripSequenceNumber = tripSequenceNumber,
+            updatedAt = System.currentTimeMillis(),
+        )
+    }
+
+    override suspend fun countFinalizedTrips(): Int = tripDao.countFinalizedTrips()
+
+    override suspend fun getMostRecentlySignedTrip(): Trip? =
+        tripDao.getMostRecentlySignedTrip()?.toDomain()
 
     override suspend fun updateStartLocationIfUnset(tripId: String, latitude: Double, longitude: Double) {
         tripDao.updateStartLocationIfUnset(tripId, latitude, longitude, updatedAt = System.currentTimeMillis())
@@ -142,6 +166,8 @@ class TripRepositoryImpl @Inject constructor(
         updatedAt = updatedAt,
         signatureBase64 = signatureBase64,
         signingKeyId = signingKeyId,
+        tripSequenceNumber = tripSequenceNumber,
+        isManualStart = isManualStart,
     )
 
     private fun Trip.toEntity(): TripEntity = TripEntity(
@@ -164,5 +190,7 @@ class TripRepositoryImpl @Inject constructor(
         updatedAt = updatedAt,
         signatureBase64 = signatureBase64,
         signingKeyId = signingKeyId,
+        tripSequenceNumber = tripSequenceNumber,
+        isManualStart = isManualStart,
     )
 }

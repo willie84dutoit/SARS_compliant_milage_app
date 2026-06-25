@@ -150,4 +150,6 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.room:room-testing:2.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // runTest (kotlinx.coroutines.test) is needed in the instrumented test scope as well as JVM.
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }

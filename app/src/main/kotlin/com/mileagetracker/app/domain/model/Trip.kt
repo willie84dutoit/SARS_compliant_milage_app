@@ -33,4 +33,16 @@ data class Trip(
     val updatedAt: Long,
     val signatureBase64: String?,
     val signingKeyId: String?,
+    /**
+     * Monotonic finalization counter assigned at signing time (T-008). See [TripEntity.tripSequenceNumber]
+     * for the full semantics. 0 for trips that have not yet been signed.
+     */
+    val tripSequenceNumber: Int,
+
+    /**
+     * H-1/H-2 fix: true when the trip was started via ManualStart (user tapped Start), false
+     * when detected automatically via ActivityRecognition. Drives the Home banner label and the
+     * classification notification title so manual trips are never mislabelled "Detected".
+     */
+    val isManualStart: Boolean,
 )

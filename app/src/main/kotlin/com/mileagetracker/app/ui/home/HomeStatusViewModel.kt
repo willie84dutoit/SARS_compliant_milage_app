@@ -22,27 +22,30 @@ import javax.inject.Inject
 /**
  * T-001 blueprint §5, row 2: in-progress trip + last-completed-trip summary.
  *
- * [autoRoutedToClassificationTripId] is the T-022 back-loop fix (team/TASKS.md T-022 card):
- * it records which trip id [HomeStatusScreen]'s `LaunchedEffect` has already auto-navigated to
- * Trip Classification for. Without this, every recomposition of Home while the same trip is
- * still [TripStatus.PENDING_OCR] (e.g. immediately after the user presses system Back off the
- * Classification screen) re-fired the auto-navigation and made Back feel modal/blocked. See
- * [onTripClassificationAutoRouted] and [onResumeClassificationClicked].
+ * [autoRoutedToClassificationTripId] is the T-022 back-loop fix: records which trip id
+ * [HomeStatusScreen]'s `LaunchedEffect` has already auto-navigated to Trip Classification for.
+ * Without this gate, every recomposition of Home while the same trip is still [TripStatus.PENDING_OCR]
+ * (e.g. immediately after the user presses system Back off the Classification screen) re-fired
+ * the auto-navigation. See [onTripClassificationAutoRouted] and [onResumeClassificationClicked].
+ *
+ * C-2 note: the former [pendingOdometerNavigationTripId] gate and all related methods
+ * (onClassificationSavedNavigatingToOdometer, onResumeOdometerClicked) are removed.
+ * The two-screen gap they guarded (Classification saved, trip still PENDING_OCR while navigating
+ * to OdometerCapture) no longer exists — classification and odometer are now one atomic Save on
+ * the merged TripClassificationScreen.
  */
 data class HomeStatusUiState(
     val inProgressTrip: Trip? = null,
     val lastCompletedTrip: Trip? = null,
     val autoRoutedToClassificationTripId: String? = null,
 ) {
-    /** True only while a trip is actively being GPS-tracked (not while pending classification/odometer). */
+    /** True only while a trip is actively GPS-tracked (not while pending classification). */
     val isTrackingActive: Boolean get() = inProgressTrip?.status == TripStatus.ACTIVE
 
     /**
      * True when there is a trip awaiting classification that the user has already backed out of
-     * once (i.e. auto-navigation already fired for it) — Home must show a manual way back in
-     * rather than silently stranding the trip, since Work trips cannot export without a business
-     * reason (locked v1 fact) and the trip cannot self-resolve without the user finishing
-     * classification.
+     * once — Home shows "Resume classification" instead of silently stranding the trip. Work trips
+     * cannot export without a business reason (locked v1 fact).
      */
     val showResumeClassificationAction: Boolean
         get() = inProgressTrip != null &&
@@ -51,16 +54,9 @@ data class HomeStatusUiState(
 }
 
 /**
- * Owns the manual start/stop control surface (this MVP build's primary trip trigger, ahead of
- * T-002's automatic ActivityRecognition start). Starting/stopping the foreground service is a
- * platform action, not business logic — the actual trip lifecycle (insert/accumulate/stop-timers)
- * lives entirely in [TripTrackingForegroundService], never here, per the blueprint §6.1 boundary
- * rule that ViewModels hold no DB/service logic themselves.
- *
- * T-022 reference pattern (team/blueprints/T-022-audit-logging-spec.md): this class is the
- * worked example for the `MT-UI` (user-initiated action) / `MT-Trip` (DB read/write tied to that
- * action) audit-logging convention. Read the spec file before replicating this pattern into
- * `TripClassificationViewModel` or `OdometerCaptureViewModel`.
+ * Owns the manual start/stop control surface. Starting/stopping the foreground service is a
+ * platform action — the actual trip lifecycle lives entirely in [TripTrackingForegroundService],
+ * never here, per blueprint §6.1 boundary rule.
  */
 @HiltViewModel
 class HomeStatusViewModel @Inject constructor(
@@ -120,26 +116,24 @@ class HomeStatusViewModel @Inject constructor(
 
     /**
      * T-022 back-loop fix: called by [HomeStatusScreen] exactly once per trip, the first time it
-     * auto-navigates to Trip Classification for [tripId]. Recorded here (not just as a local
-     * `remember` in the screen) so the gate survives the screen's own recomposition/recreation,
-     * and so a second auto-navigation attempt for the same still-PENDING_OCR trip is provably a
-     * no-op rather than a repeat of the original bug.
+     * auto-navigates to Trip Classification for [tripId]. Recorded here so the gate survives
+     * screen recomposition/recreation, and so a second auto-navigation attempt for the same
+     * still-PENDING_OCR trip is provably a no-op.
      */
     fun onTripClassificationAutoRouted(tripId: String) {
         Timber.tag("MT-UI").i(
-            "HomeStatusScreen: auto-navigated to TripClassification for tripId=%s (first time " +
-                "this session — will not auto-navigate again for this trip)",
+            "HomeStatusScreen: auto-navigated to TripClassification for tripId=%s " +
+                "(first time — will not auto-navigate again for this trip)",
             tripId,
         )
         autoRoutedToClassificationTripId.value = tripId
     }
 
     /**
-     * T-022 back-loop fix: the manual escape hatch. After the user backs out of Classification
-     * once, [HomeStatusUiState.showResumeClassificationAction] becomes true and Home shows a
-     * "Resume classification" action instead of silently re-trapping the user — this is the
-     * explicit, user-initiated re-entry into the same auto-navigation callback used the first
-     * time, so it is logged under the same tags for a complete trail.
+     * T-022 back-loop fix: manual escape hatch. After the user backs out of Classification once,
+     * [HomeStatusUiState.showResumeClassificationAction] is true and Home shows a "Resume
+     * classification" button. This method is called on that tap — navigation itself is handled
+     * by the caller.
      */
     fun onResumeClassificationClicked() {
         val inProgressTripId = uiState.value.inProgressTrip?.id

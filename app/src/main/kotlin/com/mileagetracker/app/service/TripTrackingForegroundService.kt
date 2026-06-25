@@ -5,8 +5,11 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationRequest
@@ -109,6 +112,18 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
     /** In-memory state for the currently active trip; null whenever no trip is being tracked. */
     private var activeTripId: String? = null
     private var accumulatedDistanceMeters: Double = 0.0
+    /** H-2 fix: mirrors [isManualStart] for the active trip so notifyTripAwaitingClassification can pass the correct title. */
+    private var activeTripIsManualStart: Boolean = false
+
+    /**
+     * H-1/H-2 fix: records whether the pending trip start was triggered manually (ManualStart
+     * intent) or automatically (ConfidentVehicleEntry/LowConfidenceRetryExhausted from
+     * ActivityRecognition). Set in [handleStartTripRequested] / [handleAutomaticStartEvent] before
+     * calling [completeTripStart], consumed and reset to false in [completeTripStart]. Defaults to
+     * false (auto-detected) so the sentinel value is conservative — an unset field reads as
+     * auto-detected, not manual.
+     */
+    private var pendingTripIsManualStart: Boolean = false
 
     /**
      * The transient pre-trip phase, per [TripLifecycleStateMachine.TransientPhase]. Owned here
@@ -152,7 +167,44 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(FOREGROUND_NOTIFICATION_ID, buildPersistentNotification())
+        // C-1 fix: always call startForeground() before any other logic (Android requires it within
+        // 5 seconds of startForegroundService()). The primary caller — MainActivity — is now gated
+        // on the location permission so we normally arrive here with the permission already granted.
+        // As a safety net for stale pending intents or other callers, we catch SecurityException
+        // (API 29–33, permission absent) and InvalidForegroundServiceTypeException (API 34+, same
+        // root cause) and immediately stop the service if promotion fails. This satisfies the brief's
+        // "graceful limited mode when permissions denied" without leaving a zombie foreground service.
+        val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        } else {
+            0
+        }
+        try {
+            ServiceCompat.startForeground(
+                this,
+                FOREGROUND_NOTIFICATION_ID,
+                buildPersistentNotification(),
+                fgsType,
+            )
+        } catch (securityException: SecurityException) {
+            Timber.tag("MT-Service").w(
+                securityException,
+                "onStartCommand: SecurityException promoting to foreground — location permission " +
+                    "absent. Stopping service (C-1 graceful limited mode).",
+            )
+            stopSelf()
+            return START_NOT_STICKY
+        } catch (runtimeException: RuntimeException) {
+            // Catches InvalidForegroundServiceTypeException on API 34+ (subclass of RuntimeException)
+            // when the location permission is absent.
+            Timber.tag("MT-Service").w(
+                runtimeException,
+                "onStartCommand: RuntimeException promoting to foreground — likely location " +
+                    "permission absent on API 34+. Stopping service (C-1 graceful limited mode).",
+            )
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         val requestedAction = intent?.action
         serviceScope.launch {
@@ -247,6 +299,8 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
             currentPhase = transientPhase,
             event = TripStartEvent.ManualStart(startedAtEpochMillis = startedAtEpochMillis),
         )
+        // H-1/H-2 fix: flag this as a manual start so completeTripStart can persist it on the trip.
+        pendingTripIsManualStart = true
 
         completeTripStart(startedAtEpochMillis)
     }
@@ -276,6 +330,9 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
                     currentPhase = transientPhase,
                     event = startEvent,
                 )
+                // H-1/H-2 fix: automatic detection path — explicit false so the stored trip is
+                // not mislabelled as manual.
+                pendingTripIsManualStart = false
 
                 completeTripStart(startedAtEpochMillis)
             }
@@ -304,6 +361,10 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
     private suspend fun completeTripStart(startedAtEpochMillis: Long) {
         val tripId = UUID.randomUUID().toString()
         val photoRetention = settingsRepository.observePhotoRetentionMode().first()
+        // H-1/H-2 fix: snapshot and reset the flag atomically within this critical section
+        // (caller holds tripLifecycleMutex) so a concurrent start path cannot read a stale value.
+        val tripIsManualStart = pendingTripIsManualStart
+        pendingTripIsManualStart = false
 
         // Blueprint §4: insertTrip() happens at the exact moment PromptPending resolves into an
         // active trip — the manual-start path has no real notification-render delay, so that
@@ -316,6 +377,7 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
         transientPhase = TripLifecycleStateMachine.TransientPhase.NoTrip
 
         activeTripId = tripId
+        activeTripIsManualStart = tripIsManualStart
         accumulatedDistanceMeters = 0.0
         tripLocationCallback.reset()
 
@@ -340,6 +402,8 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
                 updatedAt = startedAtEpochMillis,
                 signatureBase64 = null,
                 signingKeyId = null,
+                tripSequenceNumber = 0,
+                isManualStart = tripIsManualStart,
             ),
         )
 
@@ -467,9 +531,11 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
         // `handleStopEvent` tail, so the notification is never duplicated per-path. Every stop
         // today always resolves to PENDING_OCR (see the state-machine comment above), so this
         // fires unconditionally rather than re-deciding when to notify.
-        notifyTripAwaitingClassification(tripId)
+        // H-2 fix: pass the active trip's manual-start flag so the notification title is correct.
+        notifyTripAwaitingClassification(tripId, isManualStart = activeTripIsManualStart)
 
         activeTripId = null
+        activeTripIsManualStart = false
         accumulatedDistanceMeters = 0.0
         tripLocationCallback.reset()
 
@@ -484,7 +550,11 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
      * recovery re-running this code path never stacks a second, duplicate notification for a trip
      * that already has one showing; `notify()` with the same id simply replaces it.
      */
-    private fun notifyTripAwaitingClassification(tripId: String) {
+    /**
+     * H-2 fix: [isManualStart] is forwarded to the notification builder so the title reads
+     * "Trip recorded" for manual starts and "Trip detected" for automatic detection.
+     */
+    private fun notifyTripAwaitingClassification(tripId: String, isManualStart: Boolean) {
         val notificationManager = ContextCompat.getSystemService(this, NotificationManager::class.java)
         if (notificationManager == null) {
             Timber.tag("MT-Service").e(
@@ -494,16 +564,36 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
             return
         }
         Timber.tag("MT-Trip").i(
-            "TripTrackingForegroundService: trip stopped, posting classification notification tripId=%s",
+            "TripTrackingForegroundService: trip stopped, posting classification notification " +
+                "tripId=%s isManualStart=%s",
             tripId,
+            isManualStart,
         )
-        notificationManager.notify(tripId.hashCode(), tripClassificationNotificationBuilder.build(tripId))
+        notificationManager.notify(
+            tripId.hashCode(),
+            tripClassificationNotificationBuilder.build(tripId, isManualStart = isManualStart),
+        )
     }
 
     private fun buildPersistentNotification() =
         NotificationCompat.Builder(this, TripAlertNotificationChannel.CHANNEL_ID)
             .setContentTitle("Mileage Tracker is running")
             .setContentText(if (activeTripId != null) "Tracking a trip" else "Watching for trip activity")
+            .setSmallIcon(R.drawable.ic_notification_trip)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+
+    /**
+     * C-1 fix: fallback notification used when location permission is absent. Informs the user
+     * that the app is running in limited mode (brief §locked "graceful limited mode when
+     * permissions denied"). No location foregroundServiceType is requested, so no SecurityException
+     * is thrown before the Setup screen has collected permissions.
+     */
+    private fun buildLimitedModePersistentNotification() =
+        NotificationCompat.Builder(this, TripAlertNotificationChannel.CHANNEL_ID)
+            .setContentTitle("Mileage Tracker — limited mode")
+            .setContentText("Location permission not granted — open the app to grant access")
             .setSmallIcon(R.drawable.ic_notification_trip)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)

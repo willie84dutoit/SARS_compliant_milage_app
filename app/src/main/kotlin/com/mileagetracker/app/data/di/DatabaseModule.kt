@@ -21,7 +21,9 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideMileageTrackerDatabase(@ApplicationContext appContext: Context): MileageTrackerDatabase {
-        return Room.databaseBuilder(appContext, MileageTrackerDatabase::class.java, DATABASE_NAME).build()
+        return Room.databaseBuilder(appContext, MileageTrackerDatabase::class.java, DATABASE_NAME)
+            .addMigrations(MileageTrackerDatabase.MIGRATION_1_2, MileageTrackerDatabase.MIGRATION_2_3)
+            .build()
     }
 
     @Provides

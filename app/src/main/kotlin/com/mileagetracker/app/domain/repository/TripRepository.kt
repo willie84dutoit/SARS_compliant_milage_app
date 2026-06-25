@@ -37,6 +37,20 @@ interface TripRepository {
 
     suspend fun markTripCompleted(tripId: String, signatureBase64: String, signingKeyId: String)
 
+    /** T-008: writes the three signing fields without touching status — called before [markTripCompleted]. */
+    suspend fun updateSigningFields(
+        tripId: String,
+        signatureBase64: String,
+        signingKeyId: String,
+        tripSequenceNumber: Int,
+    )
+
+    /** T-008: count of trips in completed or pending_business_reason state — used to assign [Trip.tripSequenceNumber]. */
+    suspend fun countFinalizedTrips(): Int
+
+    /** T-008 cold-start self-heal: returns the highest-sequence signed trip, or null if none exist yet. */
+    suspend fun getMostRecentlySignedTrip(): Trip?
+
     // --- T-004 live-tracking writes (called from TripTrackingForegroundService only) ---------
 
     /** Sets the trip's start lat/lng once, on the first GPS fix of the trip. No-op if already set. */

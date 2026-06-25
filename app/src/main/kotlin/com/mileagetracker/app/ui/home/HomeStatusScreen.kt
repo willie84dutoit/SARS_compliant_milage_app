@@ -4,13 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,21 +23,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.mileagetracker.app.domain.model.TripStatus
+import com.mileagetracker.app.ui.common.MileageTrackerScaffold
 
 /**
- * Home/Status screen shell (brief §7 #2). Owns the manual Start/Stop trip control for this MVP
- * build (T-002's automatic ActivityRecognition start is the eventual primary trigger). When the
- * in-progress trip transitions to PENDING_OCR (the foreground service's stop-event landing state,
- * blueprint §4), this screen routes to Trip Classification automatically **once** per trip.
+ * Home/Status screen (brief §7 #2). Owns the manual Start/Stop trip control. When the in-progress
+ * trip transitions to PENDING_OCR this screen routes to Trip Classification automatically once.
  *
- * T-022 back-loop fix (team/TASKS.md T-022 card): the auto-navigation used to re-fire on every
- * recomposition where the trip was still PENDING_OCR — which made pressing system Back off
- * Classification feel modal, since Back popped to Home and Home immediately bounced straight
- * back to Classification. [HomeStatusUiState.autoRoutedToClassificationTripId] now gates this
- * `LaunchedEffect` to fire at most once per trip id; after that, [HomeStatusUiState.showResumeClassificationAction]
- * surfaces an explicit "Resume classification" button instead, so the trip is never silently
- * stranded in PENDING_OCR with no way back in (Work trips need a non-empty business reason
- * before they can complete/export — locked v1 fact).
+ * T-022 back-loop fix: the auto-navigation fires at most once per trip id, gated by
+ * [HomeStatusUiState.autoRoutedToClassificationTripId]. After Back off the Classification screen,
+ * [HomeStatusUiState.showResumeClassificationAction] surfaces an explicit "Resume classification"
+ * button so the trip is never silently stranded.
+ *
+ * C-2 note: the former isPendingOdometerCapture guard and "Resume odometer capture" button are
+ * removed. Classification and odometer are now one atomic Save; the two-screen gap that required
+ * the C-2 gate no longer exists.
+ *
+ * H-1 fix: banner label distinguishes manual starts ("Trip active (manual)") from auto-detected
+ * trips ("Trip detected") using [Trip.isManualStart].
  */
 @Composable
 fun HomeStatusScreen(
@@ -54,28 +55,43 @@ fun HomeStatusScreen(
         val inProgressTrip = uiState.inProgressTrip
         val alreadyAutoRouted = inProgressTrip != null &&
             inProgressTrip.id == uiState.autoRoutedToClassificationTripId
-        if (inProgressTrip != null && inProgressTrip.status == TripStatus.PENDING_OCR && !alreadyAutoRouted) {
+        if (
+            inProgressTrip != null &&
+            inProgressTrip.status == TripStatus.PENDING_OCR &&
+            !alreadyAutoRouted
+        ) {
             viewModel.onTripClassificationAutoRouted(inProgressTrip.id)
             onTripAwaitingClassification(inProgressTrip.id)
         }
     }
 
-    Scaffold { contentPadding ->
+    MileageTrackerScaffold(screenTitle = "Mileage Tracker") { contentPadding ->
         Column(modifier = Modifier.padding(contentPadding).fillMaxSize().padding(24.dp)) {
-            val isDetected = uiState.inProgressTrip != null
+            val hasTripActivity = uiState.inProgressTrip != null
+            // H-1 fix: label text carries the origin signal (manual vs auto-detected).
+            val bannerText = when {
+                uiState.isTrackingActive && uiState.inProgressTrip?.isManualStart == true ->
+                    "Trip active (manual)"
+                uiState.isTrackingActive ->
+                    "Trip detected"
+                hasTripActivity ->
+                    "Finishing up..."
+                else ->
+                    "No trip active"
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(120.dp)
                     .padding(bottom = 16.dp)
                     .background(
-                        color = if (isDetected) Color(0xFF2E7D32) else Color(0xFFC62828),
+                        color = if (hasTripActivity) Color(0xFF2E7D32) else Color(0xFFC62828),
                         shape = RoundedCornerShape(16.dp),
                     ),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = if (isDetected) "Detected" else "Not detected",
+                    text = bannerText,
                     color = Color.White,
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,
@@ -83,10 +99,14 @@ fun HomeStatusScreen(
             }
             Text(
                 when {
-                    uiState.isTrackingActive -> "Trip in progress — ${"%.2f".format(uiState.inProgressTrip?.distanceKm ?: 0.0)} km"
-                    uiState.showResumeClassificationAction -> "Last trip still needs classification"
-                    uiState.inProgressTrip != null -> "Finishing up last trip..."
-                    else -> "No trip in progress"
+                    uiState.isTrackingActive ->
+                        "Trip in progress — ${"%.2f".format(uiState.inProgressTrip?.distanceKm ?: 0.0)} km"
+                    uiState.showResumeClassificationAction ->
+                        "Last trip still needs classification"
+                    uiState.inProgressTrip != null ->
+                        "Finishing up last trip..."
+                    else ->
+                        "No trip in progress"
                 },
             )
             uiState.lastCompletedTrip?.let { lastTrip ->
@@ -98,8 +118,7 @@ fun HomeStatusScreen(
                 } else if (uiState.isTrackingActive) {
                     Button(onClick = viewModel::onStopTripClicked) { Text("Stop trip") }
                 } else if (uiState.showResumeClassificationAction) {
-                    // T-022 back-loop fix: explicit manual re-entry so a trip the user backed out
-                    // of once is never stranded in PENDING_OCR with no way to finish classifying it.
+                    // T-022 back-loop fix: explicit manual re-entry after the user backed out.
                     Button(
                         onClick = {
                             viewModel.onResumeClassificationClicked()

@@ -106,4 +106,35 @@ class FakeTripRepository : TripRepository {
         val existingTrip = inProgressTripState.value?.takeIf { it.id == tripId } ?: return
         inProgressTripState.value = existingTrip.copy(endTimestamp = endTimestampEpochMillis)
     }
+
+    override suspend fun updateSigningFields(
+        tripId: String,
+        signatureBase64: String,
+        signingKeyId: String,
+        tripSequenceNumber: Int,
+    ) {
+        val existingTrip = inProgressTripState.value?.takeIf { it.id == tripId } ?: return
+        inProgressTripState.value = existingTrip.copy(
+            signatureBase64 = signatureBase64,
+            signingKeyId = signingKeyId,
+            tripSequenceNumber = tripSequenceNumber,
+        )
+    }
+
+    override suspend fun countFinalizedTrips(): Int {
+        val inProgressCount = inProgressTripState.value
+            ?.let { if (it.status == TripStatus.COMPLETED || it.status == TripStatus.PENDING_BUSINESS_REASON) 1 else 0 }
+            ?: 0
+        val historyCount = tripHistoryState.value.count {
+            it.status == TripStatus.COMPLETED || it.status == TripStatus.PENDING_BUSINESS_REASON
+        }
+        return inProgressCount + historyCount
+    }
+
+    override suspend fun getMostRecentlySignedTrip(): Trip? {
+        val allTrips = listOfNotNull(inProgressTripState.value) + tripHistoryState.value
+        return allTrips
+            .filter { it.signatureBase64 != null }
+            .maxByOrNull { it.tripSequenceNumber }
+    }
 }

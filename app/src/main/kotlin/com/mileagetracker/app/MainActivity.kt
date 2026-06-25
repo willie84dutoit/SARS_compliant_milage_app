@@ -1,6 +1,8 @@
 package com.mileagetracker.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -98,17 +100,27 @@ class MainActivity : ComponentActivity() {
      * and the automatic vehicle-entry detection pipeline (T-002) is actually listening, rather than
      * only starting once a trip has already begun manually via [TripTrackingForegroundService.ACTION_START_TRIP].
      *
-     * Scoped deliberately to "user opens the app" for this chunk — per the logged T-002 decision, a
-     * boot-completed receiver and a Settings always-on/sleeping-wake-on-detection redesign are both
-     * explicitly deferred, not built here.
-     *
-     * Not gated on any permission: [TripTrackingForegroundService.onStartCommand] only re-runs the
-     * no-op-safe recovery check and re-registers the (idempotent) ActivityRecognition transition
-     * request when no action is supplied — it does not require ACTIVITY_RECOGNITION or location
-     * permission to start safely, and its own GPS path is independently gated on
-     * `hasFineLocationPermission()`.
+     * C-1 fix: gated on location permission. On API 34+, a foreground service declared with
+     * foregroundServiceType="location" in the manifest cannot be promoted to foreground without the
+     * location permission — calling startForeground() with type=none is prohibited, and calling it
+     * with type=location without the permission throws SecurityException. If the permission is absent
+     * (clean first install before the Setup screen runs), we skip the service start entirely. The
+     * SetupPermissions screen will prompt the user and, once granted, the service is started on the
+     * next app open or via the explicit start-trip button. This is the brief's "graceful limited mode"
+     * for the permission-absent state.
      */
     private fun startTripTrackingServiceForDetection() {
+        val hasFineLocation = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!hasFineLocation) {
+            Timber.tag("MT-Service").i(
+                "Skipping detection service start — location permission not yet granted. " +
+                    "SetupPermissions screen will prompt the user.",
+            )
+            return
+        }
         Timber.tag("MT-Service").i("Auto-starting detection service from app launch")
         val detectionIntent = Intent(this, TripTrackingForegroundService::class.java)
         ContextCompat.startForegroundService(this, detectionIntent)

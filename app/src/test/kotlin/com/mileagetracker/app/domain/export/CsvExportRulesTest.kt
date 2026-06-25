@@ -10,16 +10,87 @@ import org.junit.Test
 
 class CsvExportRulesTest {
 
+    // ------------------------------------------------------------------
+    // G1: exact CSV header contract (T-007.6 amended — 12 columns)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `CsvRow HEADER joinToString produces the exact T-007-6 column string with SAST columns`() {
+        val actualHeaderString = CsvRow.HEADER.joinToString(",")
+        assertEquals(
+            "tripId,classification,startTimestamp,endTimestamp,startOdometerKm," +
+                "endOdometerKm,verifiedOdometerKm,distanceKm,businessReason,status," +
+                "startDateTime,endDateTime",
+            actualHeaderString,
+        )
+    }
+
+    // ------------------------------------------------------------------
+    // G1b: SAST datetime formatting — known epoch-millis -> expected string
+    // NOTE: this JVM test uses the same SimpleDateFormat + Africa/Johannesburg
+    // mechanism that CsvExportRules uses. Because SimpleDateFormat respects the
+    // TZ argument explicitly (not the device default), the output is identical on
+    // JVM and Android runtime. The authoritative assertion of the exact formatted
+    // value against a real Android runtime is in CsvExportEndToEndTest (instrumented).
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `buildExportRows formats startTimestamp and endTimestamp as SAST yyyy-MM-dd HH mm ss`() {
+        // startTimestamp = 1_000L ms = 1970-01-01 02:00:01 SAST (UTC+2)
+        // endTimestamp   = 2_000L ms = 1970-01-01 02:00:02 SAST (UTC+2)
+        val completedPrivateTrip = buildTrip(
+            startTimestamp = 1_000L,
+            endTimestamp = 2_000L,
+        )
+        val exportRows = CsvExportRules.buildExportRows(listOf(completedPrivateTrip))
+        assertEquals(1, exportRows.size)
+        val exportedRow = exportRows.first()
+        assertEquals(
+            "startDateTime must be 1970-01-01 02:00:01 SAST for epoch-millis 1000",
+            "1970-01-01 02:00:01",
+            exportedRow.startDateTime,
+        )
+        assertEquals(
+            "endDateTime must be 1970-01-01 02:00:02 SAST for epoch-millis 2000",
+            "1970-01-01 02:00:02",
+            exportedRow.endDateTime,
+        )
+    }
+
+    // ------------------------------------------------------------------
+    // G2: PENDING_BUSINESS_REASON trips are excluded from export
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `excludes trips with status PENDING_BUSINESS_REASON`() {
+        val pendingBusinessReasonTrip = buildTrip(
+            classification = TripClassification.WORK,
+            status = TripStatus.PENDING_BUSINESS_REASON,
+            businessReason = null,
+        )
+        val exportRows = CsvExportRules.buildExportRows(listOf(pendingBusinessReasonTrip))
+        assertTrue(
+            "PENDING_BUSINESS_REASON trip must not appear in export rows",
+            exportRows.isEmpty(),
+        )
+    }
+
+    // ------------------------------------------------------------------
+    // Shared trip builder
+    // ------------------------------------------------------------------
+
     private fun buildTrip(
         id: String = "trip-1",
         classification: TripClassification = TripClassification.PRIVATE,
         status: TripStatus = TripStatus.COMPLETED,
         businessReason: String? = null,
+        startTimestamp: Long = 1_000L,
+        endTimestamp: Long = 2_000L,
     ) = Trip(
         id = id,
         classification = classification,
-        startTimestamp = 1_000L,
-        endTimestamp = 2_000L,
+        startTimestamp = startTimestamp,
+        endTimestamp = endTimestamp,
         startOdometerKm = 100.0,
         endOdometerKm = 110.0,
         verifiedOdometerKm = 110.0,
@@ -35,6 +106,8 @@ class CsvExportRulesTest {
         updatedAt = 1_000L,
         signatureBase64 = null,
         signingKeyId = null,
+        tripSequenceNumber = 0,
+        isManualStart = false,
     )
 
     @Test
