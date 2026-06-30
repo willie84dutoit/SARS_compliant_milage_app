@@ -14,6 +14,7 @@ import com.mileagetracker.app.domain.ocr.OdometerOcrResult
 import com.mileagetracker.app.domain.repository.FakeSettingsRepository
 import com.mileagetracker.app.domain.repository.FakeTripRepository
 import com.mileagetracker.app.domain.repository.TripPhotoRepository
+import com.mileagetracker.app.domain.statemachine.TripLifecycleStateMachine
 import com.mileagetracker.app.ui.navigation.Screen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -115,6 +116,9 @@ class TripClassificationViewModelTest {
             tripPhotoRepository = fakeTripPhotoRepository,
             odometerOcrClient = fakeOcrClient,
             tripSigningOrchestrator = fakeOrchestrator,
+            // P0.3: state machine is now injected; tests supply a real instance directly
+            // (it is stateless pure logic, no mocking needed).
+            tripLifecycleStateMachine = TripLifecycleStateMachine(),
         )
     }
 
@@ -411,6 +415,41 @@ class TripClassificationViewModelTest {
         assertTrue("onSaved callback must fire on happy path", savedCallbackFired)
         assertTrue("photo repo must have been called", fakePhotoRepo.saveCallsRecorded.isNotEmpty())
         assertEquals(testImageUri, fakePhotoRepo.saveCallsRecorded.first().imageUri)
+    }
+
+    // ------------------------------------------------------------------
+    // onCaptureOrDecodeError — T-031 N-3 (visible feedback on decode failure)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `onCaptureOrDecodeError closes camera overlay and sets saveError message`() = runTest {
+        val fakeRepo = FakeTripRepository()
+        fakeRepo.setInProgressTrip(buildPendingOcrTrip())
+        val viewModel = buildViewModel(fakeTripRepository = fakeRepo)
+        advanceUntilIdle()
+
+        // Open the camera overlay first so we can verify it closes on error.
+        viewModel.onTakeOdometerPhotoClicked()
+        assertTrue(
+            "isCameraPreviewVisible should be true after take-photo tap",
+            viewModel.uiState.value.isCameraPreviewVisible,
+        )
+
+        viewModel.onCaptureOrDecodeError("Bitmap decode returned null for /ocr/odometer_test.jpg")
+
+        val errorState = viewModel.uiState.value
+        assertFalse(
+            "isCameraPreviewVisible should be false after capture error",
+            errorState.isCameraPreviewVisible,
+        )
+        assertFalse(
+            "isOcrInProgress should be false after capture error",
+            errorState.isOcrInProgress,
+        )
+        assertNotNull(
+            "saveError should be non-null so the user sees visible feedback",
+            errorState.saveError,
+        )
     }
 }
 

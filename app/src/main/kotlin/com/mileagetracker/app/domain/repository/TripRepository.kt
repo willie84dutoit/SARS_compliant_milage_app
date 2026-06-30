@@ -29,11 +29,23 @@ interface TripRepository {
     /** The single insert point per blueprint §2 — callers must have confirmed [getInProgressTrip] returned null first. */
     suspend fun insertNewActiveTrip(trip: Trip)
 
-    suspend fun updateClassification(tripId: String, classification: TripClassification, businessReason: String?)
+    /**
+     * T-033: guarded — returns [TripWriteResult.RejectedSignedRow] if the trip is already signed,
+     * [TripWriteResult.TripNotFound] if the tripId does not exist, [TripWriteResult.Success] otherwise.
+     */
+    suspend fun updateClassification(tripId: String, classification: TripClassification, businessReason: String?): TripWriteResult
 
-    suspend fun updateBusinessReason(tripId: String, businessReason: String)
+    /**
+     * T-033: guarded — returns [TripWriteResult.RejectedSignedRow] if the trip is already signed,
+     * [TripWriteResult.TripNotFound] if the tripId does not exist, [TripWriteResult.Success] otherwise.
+     */
+    suspend fun updateBusinessReason(tripId: String, businessReason: String): TripWriteResult
 
-    suspend fun updateVerifiedOdometer(tripId: String, verifiedOdometerKm: Double)
+    /**
+     * T-033: guarded — returns [TripWriteResult.RejectedSignedRow] if the trip is already signed,
+     * [TripWriteResult.TripNotFound] if the tripId does not exist, [TripWriteResult.Success] otherwise.
+     */
+    suspend fun updateVerifiedOdometer(tripId: String, verifiedOdometerKm: Double): TripWriteResult
 
     suspend fun markTripCompleted(tripId: String, signatureBase64: String, signingKeyId: String)
 
@@ -45,8 +57,14 @@ interface TripRepository {
         tripSequenceNumber: Int,
     )
 
-    /** T-008: count of trips in completed or pending_business_reason state — used to assign [Trip.tripSequenceNumber]. */
-    suspend fun countFinalizedTrips(): Int
+    /**
+     * T-008 / T-034: count of trips that already have an assigned tripSequenceNumber (> 0),
+     * excluding [excludeTripId] (the trip being signed right now). Used to derive the next
+     * monotonic sequence number: assignedSequenceNumber = countAssignedSequenceNumbers(id) + 1.
+     * Excludes the current trip because a PENDING_BUSINESS_REASON WORK trip has tripSequenceNumber
+     * == 0 (not yet assigned) and must not count itself.
+     */
+    suspend fun countAssignedSequenceNumbers(excludeTripId: String): Int
 
     /** T-008 cold-start self-heal: returns the highest-sequence signed trip, or null if none exist yet. */
     suspend fun getMostRecentlySignedTrip(): Trip?

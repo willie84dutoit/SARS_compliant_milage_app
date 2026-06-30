@@ -14,9 +14,11 @@ import com.mileagetracker.app.domain.ocr.OdometerOcrClient
 import com.mileagetracker.app.domain.ocr.OdometerOcrResult
 import com.mileagetracker.app.domain.repository.TripPhotoRepository
 import com.mileagetracker.app.domain.repository.TripRepository
+import com.mileagetracker.app.domain.repository.TripWriteResult
 import com.mileagetracker.app.domain.statemachine.TripLifecycleStateMachine
 import com.mileagetracker.app.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -86,10 +88,14 @@ class TripClassificationViewModel @Inject constructor(
     private val tripPhotoRepository: TripPhotoRepository,
     private val odometerOcrClient: OdometerOcrClient,
     private val tripSigningOrchestrator: TripSigningOrchestrator,
+    // P0.3: injected rather than constructed directly so tests can substitute a controlled
+    // instance and the binding is consistent with the rest of the Hilt graph. The state machine
+    // holds no mutable state (pure transition logic), so sharing a @Singleton instance between
+    // this ViewModel and TripTrackingForegroundService is safe.
+    private val tripLifecycleStateMachine: TripLifecycleStateMachine,
 ) : ViewModel() {
 
     private val tripId: String = requireNotNull(savedStateHandle[Screen.TripClassification.ARG_TRIP_ID])
-    private val tripLifecycleStateMachine = TripLifecycleStateMachine()
 
     private val _uiState = MutableStateFlow(TripClassificationUiState())
     val uiState: StateFlow<TripClassificationUiState> = _uiState.asStateFlow()
@@ -152,6 +158,28 @@ class TripClassificationViewModel @Inject constructor(
             tripId,
         )
         _uiState.value = _uiState.value.copy(isCameraPreviewVisible = false)
+    }
+
+    /**
+     * Called by the camera overlay when CameraX capture fails OR when bitmap decode returns null
+     * (T-031 N-3). Closes the camera overlay and surfaces the error in [saveError] so the user
+     * sees visible feedback and the retake button remains accessible.
+     *
+     * This reuses the existing [saveError] state field (also used by [onSaveClassification]) to
+     * avoid adding a new error channel — both represent "something went wrong; look at this message
+     * and try again."
+     */
+    fun onCaptureOrDecodeError(errorMessage: String) {
+        Timber.tag(CLASSIFICATION_UI_LOG_TAG).e(
+            "TripClassificationScreen: capture/decode error tripId=%s error=%s",
+            tripId,
+            errorMessage,
+        )
+        _uiState.value = _uiState.value.copy(
+            isCameraPreviewVisible = false,
+            isOcrInProgress = false,
+            saveError = "Photo capture failed — please retake",
+        )
     }
 
     /**
@@ -330,7 +358,18 @@ class TripClassificationViewModel @Inject constructor(
                     classification,
                     businessReasonToStore,
                 )
-                tripRepository.updateClassification(tripId, classification, businessReasonToStore)
+                val classificationWriteResult = tripRepository.updateClassification(tripId, classification, businessReasonToStore)
+                if (classificationWriteResult == TripWriteResult.RejectedSignedRow) {
+                    Timber.tag(CLASSIFICATION_TRIP_LOG_TAG).w(
+                        "TripClassificationScreen: classification write rejected — trip already signed tripId=%s",
+                        tripId,
+                    )
+                    _uiState.value = _uiState.value.copy(
+                        isSaving = false,
+                        saveError = "This trip is finalized and can't be edited",
+                    )
+                    return@launch
+                }
 
                 if (verifiedOdometerKmOrNull != null) {
                     Timber.tag(CLASSIFICATION_TRIP_LOG_TAG).i(
@@ -338,7 +377,18 @@ class TripClassificationViewModel @Inject constructor(
                         verifiedOdometerKmOrNull,
                         tripId,
                     )
-                    tripRepository.updateVerifiedOdometer(tripId, verifiedOdometerKmOrNull)
+                    val odometerWriteResult = tripRepository.updateVerifiedOdometer(tripId, verifiedOdometerKmOrNull)
+                    if (odometerWriteResult == TripWriteResult.RejectedSignedRow) {
+                        Timber.tag(CLASSIFICATION_TRIP_LOG_TAG).w(
+                            "TripClassificationScreen: odometer write rejected — trip already signed tripId=%s",
+                            tripId,
+                        )
+                        _uiState.value = _uiState.value.copy(
+                            isSaving = false,
+                            saveError = "This trip is finalized and can't be edited",
+                        )
+                        return@launch
+                    }
                 } else {
                     Timber.tag(CLASSIFICATION_TRIP_LOG_TAG).i(
                         "TripClassificationScreen: no reading provided — skipping updateVerifiedOdometer tripId=%s",
@@ -364,6 +414,13 @@ class TripClassificationViewModel @Inject constructor(
 
                 _uiState.value = _uiState.value.copy(isSaving = false)
                 onSaved()
+            } catch (cancellationException: CancellationException) {
+                // P0.1: rethrow CancellationException so structured concurrency can propagate
+                // the cancellation correctly (e.g. when viewModelScope is cancelled on ViewModel
+                // clear). Swallowing it would silently break coroutine cancellation and leave
+                // isSaving=true on a destroyed ViewModel. Pattern mirrors MileageTrackerApplication
+                // .launchChainTailSelfHeal() exactly.
+                throw cancellationException
             } catch (saveCaughtException: Exception) {
                 Timber.tag(CLASSIFICATION_TRIP_LOG_TAG).e(
                     saveCaughtException,

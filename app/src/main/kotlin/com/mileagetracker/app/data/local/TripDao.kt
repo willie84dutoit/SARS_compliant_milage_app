@@ -54,8 +54,40 @@ interface TripDao {
     @Query("UPDATE trips SET status = :newStatus, updated_at = :updatedAt WHERE id = :tripId")
     suspend fun updateTripStatus(tripId: String, newStatus: TripStatus, updatedAt: Long)
 
-    @Query("UPDATE trips SET business_reason = :businessReason, updated_at = :updatedAt WHERE id = :tripId")
-    suspend fun updateBusinessReason(tripId: String, businessReason: String, updatedAt: Long)
+    /**
+     * T-033: guarded business-reason update — only modifies the row when signature_base64 IS NULL
+     * (the trip has not been signed yet). Returns the number of rows updated: 1 = success, 0 = either
+     * the trip does not exist or the row is already signed (caller distinguishes by fetching the row).
+     */
+    @Query(
+        "UPDATE trips SET business_reason = :businessReason, updated_at = :updatedAt " +
+            "WHERE id = :tripId AND signature_base64 IS NULL",
+    )
+    suspend fun updateBusinessReasonGuarded(tripId: String, businessReason: String, updatedAt: Long): Int
+
+    /**
+     * T-033: guarded classification update — writes classification and business_reason together
+     * atomically, only when the row is not yet signed (signature_base64 IS NULL).
+     */
+    @Query(
+        "UPDATE trips SET classification = :classification, business_reason = :businessReason, " +
+            "updated_at = :updatedAt WHERE id = :tripId AND signature_base64 IS NULL",
+    )
+    suspend fun updateClassificationGuarded(
+        tripId: String,
+        classification: com.mileagetracker.app.domain.model.TripClassification,
+        businessReason: String?,
+        updatedAt: Long,
+    ): Int
+
+    /**
+     * T-033: guarded verified-odometer update — only writes when the row is not yet signed.
+     */
+    @Query(
+        "UPDATE trips SET verified_odometer_km = :verifiedOdometerKm, updated_at = :updatedAt " +
+            "WHERE id = :tripId AND signature_base64 IS NULL",
+    )
+    suspend fun updateVerifiedOdometerGuarded(tripId: String, verifiedOdometerKm: Double, updatedAt: Long): Int
 
     // --- T-004 live-tracking writes (foreground service only) -------------------------------
 
@@ -65,17 +97,33 @@ interface TripDao {
     )
     suspend fun updateStartLocationIfUnset(tripId: String, latitude: Double, longitude: Double, updatedAt: Long)
 
+    /**
+     * T-033: guarded end-location update — only writes when the row is not yet signed.
+     * Returns rows affected (0 = trip not found or already signed).
+     */
     @Query(
         "UPDATE trips SET end_latitude = :latitude, end_longitude = :longitude, updated_at = :updatedAt " +
-            "WHERE id = :tripId",
+            "WHERE id = :tripId AND signature_base64 IS NULL",
     )
-    suspend fun updateEndLocation(tripId: String, latitude: Double, longitude: Double, updatedAt: Long)
+    suspend fun updateEndLocationGuarded(tripId: String, latitude: Double, longitude: Double, updatedAt: Long): Int
 
-    @Query("UPDATE trips SET distance_km = :distanceKm, updated_at = :updatedAt WHERE id = :tripId")
-    suspend fun updateDistanceKm(tripId: String, distanceKm: Double, updatedAt: Long)
+    /**
+     * T-033: guarded distance update — only writes when the row is not yet signed.
+     */
+    @Query(
+        "UPDATE trips SET distance_km = :distanceKm, updated_at = :updatedAt " +
+            "WHERE id = :tripId AND signature_base64 IS NULL",
+    )
+    suspend fun updateDistanceKmGuarded(tripId: String, distanceKm: Double, updatedAt: Long): Int
 
-    @Query("UPDATE trips SET end_timestamp = :endTimestamp, updated_at = :updatedAt WHERE id = :tripId")
-    suspend fun updateEndTimestamp(tripId: String, endTimestamp: Long, updatedAt: Long)
+    /**
+     * T-033: guarded end-timestamp update — only writes when the row is not yet signed.
+     */
+    @Query(
+        "UPDATE trips SET end_timestamp = :endTimestamp, updated_at = :updatedAt " +
+            "WHERE id = :tripId AND signature_base64 IS NULL",
+    )
+    suspend fun updateEndTimestampGuarded(tripId: String, endTimestamp: Long, updatedAt: Long): Int
 
     @Delete
     suspend fun deleteTrip(trip: TripEntity)
@@ -83,14 +131,15 @@ interface TripDao {
     // --- T-008 signing queries -------------------------------------------------------------------
 
     /**
-     * Counts all trips that have passed the stop-event (completed or pending_business_reason).
-     * Used to assign [TripEntity.tripSequenceNumber] at signing time — the new trip's sequence
-     * number is this count + 1, capturing finalization order.
+     * Counts trips that already have an assigned [TripEntity.tripSequenceNumber] (> 0), excluding
+     * the trip currently being signed ([excludeTripId]). This avoids a self-count bug: a WORK trip
+     * that moves through PENDING_BUSINESS_REASON has no assigned sequence number yet (it is 0),
+     * so counting by sequence_number > 0 rather than by status prevents the trip from counting
+     * itself, which would cause a duplicate or non-monotonic sequence. The new trip's sequence
+     * number = this count + 1.
      */
-    @Query(
-        "SELECT COUNT(*) FROM trips WHERE status IN ('completed', 'pending_business_reason')",
-    )
-    suspend fun countFinalizedTrips(): Int
+    @Query("SELECT COUNT(*) FROM trips WHERE trip_sequence_number > 0 AND id != :excludeTripId")
+    suspend fun countAssignedSequenceNumbers(excludeTripId: String): Int
 
     /**
      * Returns the most recently signed trip (non-null signatureBase64, ordered by

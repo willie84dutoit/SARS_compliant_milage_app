@@ -170,6 +170,25 @@ class TripSigner @Inject constructor() {
      *   id, classification, startTimestamp, endTimestamp, startOdometerKm, endOdometerKm,
      *   verifiedOdometerKm, distanceKm, businessReason, status, prevTail, tripSequenceNumber
      *
+     * CANONICAL-PAYLOAD CONTRACT (wire-critical — Phase-2 backend must reproduce byte-for-byte):
+     * - Charset UTF-8, no BOM; signed bytes = payloadString.toByteArray(UTF-8).
+     * - Single flat JSON object, NO whitespace outside string values; no spaces after `:` or `,`;
+     *   no trailing newline.
+     * - Field order (exactly): id, classification, startTimestamp, endTimestamp, startOdometerKm,
+     *   endOdometerKm, verifiedOdometerKm, distanceKm, businessReason, status, prevTail,
+     *   tripSequenceNumber.
+     * - String values escaped per [jsonEscapeString]; keys are unescaped ASCII double-quoted.
+     * - classification/status = lowercase enum name, quoted.
+     * - Decimal numbers (startOdometerKm, endOdometerKm, verifiedOdometerKm, distanceKm):
+     *   BigDecimal HALF_UP scale 2, toPlainString(), bare (unquoted) number, always 2 fraction digits.
+     * - Integer numbers (startTimestamp, endTimestamp, tripSequenceNumber): raw base-10, unquoted.
+     * - nulls = literal `null`, never omit a field.
+     * - Signature: SHA256withECDSA P-256, DER, Base64 withoutPadding.
+     *
+     * IMPORTANT: only the KDoc was added here — the payload-building logic below must NOT be
+     * changed without re-verifying against TripSignerPayloadTest AND the Phase-2 backend
+     * canonicalizer, since any change invalidates all previously signed trips.
+     *
      * Implementation deliberately avoids [org.json.JSONObject] — that class is an Android platform
      * stub in JVM unit tests and returns null from toString(), making the payload untestable on the
      * plain JVM. Instead the JSON is assembled manually using a [StringBuilder] with explicit
@@ -235,20 +254,32 @@ class TripSigner @Inject constructor() {
     }
 
     /**
-     * Escapes a string value for embedding inside a JSON double-quoted string. Handles the
-     * characters that MUST be escaped per RFC 8259 §7: `"`, `\`, and the control characters
-     * U+0000–U+001F. All other characters are left as-is (UTF-8 passthrough).
+     * Escapes [input] for embedding inside a JSON double-quoted string, per RFC 8259 §7.
+     * Emits the short escapes for `"` `\` `\b` `\f` `\n` `\r` `\t`, escapes ALL remaining
+     * control characters U+0000..U+001F as `\u00XX` (lowercase hex), and passes every other
+     * character through unchanged (UTF-8 is applied later by toByteArray(Charsets.UTF_8)).
+     *
+     * This must stay byte-for-byte reproducible by the Phase-2 backend canonicalizer — see the
+     * canonical-payload contract in the buildCanonicalPayload KDoc. Do not “optimise” this without
+     * re-verifying against TripSignerPayloadTest.
      */
-    private fun jsonEscapeString(input: String): String = buildString(input.length + 4) {
+    private fun jsonEscapeString(input: String): String = buildString(input.length + 16) {
         for (character in input) {
             when (character) {
                 '"' -> append("\\\"")
                 '\\' -> append("\\\\")
+                '\b' -> append("\\b")
+                '\u000C' -> append("\\f")
                 '\n' -> append("\\n")
                 '\r' -> append("\\r")
                 '\t' -> append("\\t")
-                in ' '..'' -> append("\\u${character.code.toString(16).padStart(4, '0')}")
-                else -> append(character)
+                else ->
+                    if (character.code < 0x20) {
+                        append("\\u")
+                        append(character.code.toString(16).padStart(4, '0'))
+                    } else {
+                        append(character)
+                    }
             }
         }
     }

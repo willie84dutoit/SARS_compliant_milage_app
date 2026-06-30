@@ -4,29 +4,30 @@ import com.mileagetracker.app.domain.statemachine.TripLifecycleStateMachine
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
-import dagger.hilt.android.scopes.ServiceScoped
-import dagger.hilt.android.components.ServiceComponent
+import dagger.hilt.components.SingletonComponent
+import javax.inject.Singleton
 
 /**
- * Service-scoped Hilt bindings (T-001 blueprint §3). [TripLifecycleStateMachine] is provided
- * fresh per service lifecycle rather than as an app-wide `@Singleton` — the foreground service is
- * the only consumer, and scoping it to [ServiceComponent] (rather than `SingletonComponent`)
- * keeps the binding's lifetime visibly tied to the one place it's used, per the blueprint's
- * Hilt-graph table.
+ * Singleton Hilt binding for [TripLifecycleStateMachine] (T-001 blueprint §3, updated T-030/P0.3).
  *
- * [TripLifecycleStateMachine] itself does no I/O and holds no mutable state (it is a pure
- * transition-logic class, intentionally, so it stays unit-testable on the plain JVM — see its
- * class doc). "Fresh instance per service lifecycle" therefore has no observable behavioral
- * difference from a singleton today, but matches the blueprint's documented scope exactly and
- * avoids a service-lifetime object silently becoming an undocumented app-wide singleton later if
- * the class ever does gain internal state.
+ * Moved from @ServiceScoped / ServiceComponent to @Singleton / SingletonComponent so that
+ * [com.mileagetracker.app.ui.classification.TripClassificationViewModel] (a @HiltViewModel, which
+ * lives in ActivityRetainedComponent — a child of SingletonComponent) can receive the same binding
+ * via constructor injection rather than constructing its own unscoped instance.
+ *
+ * Sharing a single instance is safe because [TripLifecycleStateMachine] is explicitly documented
+ * as a pure, stateless transition-logic class — it holds no mutable fields and performs no I/O.
+ * The foreground service continues to receive it via injection; the previous
+ * "fresh instance per service lifecycle" behaviour had no observable difference in practice (the
+ * class doc confirms this), and the gain in testability and graph consistency outweighs the
+ * cosmetic scope narrowing.
  */
 @Module
-@InstallIn(ServiceComponent::class)
+@InstallIn(SingletonComponent::class)
 object ServiceModule {
 
     @Provides
-    @ServiceScoped
+    @Singleton
     fun provideTripLifecycleStateMachine(): TripLifecycleStateMachine {
         return TripLifecycleStateMachine()
     }

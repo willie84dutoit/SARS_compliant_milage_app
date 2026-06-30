@@ -1,6 +1,7 @@
 package com.mileagetracker.app
 
 import android.app.Application
+import com.mileagetracker.app.BuildConfig
 import com.mileagetracker.app.data.di.ApplicationScope
 import com.mileagetracker.app.data.logging.FileLoggingTree
 import com.mileagetracker.app.data.signing.TripSigningOrchestrator
@@ -44,7 +45,14 @@ class MileageTrackerApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        Timber.plant(FileLoggingTree(logsDirectory = File(filesDir, "logs")))
+        // T-030 P0.4 Option A (debug-only): FileLoggingTree writes PII (business reason,
+        // odometer value, photo path) to on-device storage. Gate to DEBUG builds only so a
+        // Play Store release never writes that file. The full tree remains intact for field
+        // testing with the debug APK.
+        // PII-redaction / FileProvider-share deferred to a pre-Play-Store task (T-038 / T-030 P0.4 follow-up).
+        if (BuildConfig.DEBUG) {
+            Timber.plant(FileLoggingTree(logsDirectory = File(filesDir, "logs")))
+        }
         tripAlertNotificationChannel.createChannel()
         launchChainTailSelfHeal()
     }

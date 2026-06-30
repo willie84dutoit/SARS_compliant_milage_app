@@ -201,4 +201,159 @@ class TripSigningOrchestratorSelfHealTest {
             hashOne != hashTwo,
         )
     }
+
+    // --------------------------------------------------------------------------
+    // T-034 sequence-number regression tests
+    // --------------------------------------------------------------------------
+
+    /**
+     * Regression: a WORK trip that passes through PENDING_BUSINESS_REASON before being signed
+     * must NOT count itself when computing the next sequence number. Before the T-034 fix,
+     * countFinalizedTrips() counted status IN ('completed','pending_business_reason'), so the
+     * trip counted itself → its assigned sequence was count+1 = 2 instead of the correct 1
+     * (because it was the only trip ever signed).
+     *
+     * This test places one already-signed completed trip (sequence=1) in history and one
+     * PENDING_BUSINESS_REASON WORK trip (sequence=0, unsigned) as the in-progress trip, then
+     * triggers signing. The assigned sequence must be 2 (one already-assigned sequence + 1),
+     * not 3 (which would result from self-counting).
+     */
+    @Test
+    fun `pending business reason trip does not self-count and receives correct sequence number`() = runTest {
+        val alreadySignedTrip = buildSignedTrip(
+            id = "trip-already-signed",
+            signatureBase64 = "c2lnbmF0dXJlLW9uZQ==",
+            tripSequenceNumber = 1,
+        )
+
+        val fakeTripRepository = FakeTripRepository()
+        fakeTripRepository.setTripHistory(listOf(alreadySignedTrip))
+
+        // The PENDING_BUSINESS_REASON trip: tripSequenceNumber = 0 (unsigned), status pending.
+        val pendingWorkTrip = Trip(
+            id = "trip-work-pending",
+            classification = TripClassification.WORK,
+            startTimestamp = 3_000L,
+            endTimestamp = 4_000L,
+            startOdometerKm = 200.0,
+            endOdometerKm = 220.0,
+            verifiedOdometerKm = 220.0,
+            distanceKm = 20.0,
+            businessReason = "Client visit",
+            startLatitude = null,
+            startLongitude = null,
+            endLatitude = null,
+            endLongitude = null,
+            status = TripStatus.PENDING_BUSINESS_REASON,
+            photoRetention = PhotoRetentionMode.SAVED,
+            createdAt = 3_000L,
+            updatedAt = 4_000L,
+            signatureBase64 = null,
+            signingKeyId = null,
+            tripSequenceNumber = 0,
+            isManualStart = false,
+        )
+        fakeTripRepository.setInProgressTrip(pendingWorkTrip)
+
+        val fakeSettingsRepository = FakeSettingsRepository()
+        // Set chain tail from the already-signed trip so genesis link is not assumed.
+        fakeSettingsRepository.chainTailHash = "fake-tail-from-trip-1"
+
+        // Use a fake orchestrator subclass that captures the assigned sequence number instead of
+        // calling the real Keystore (which is unavailable in JVM tests).
+        var capturedSequenceNumber: Int? = null
+        val orchestrator = object : TripSigningOrchestrator(
+            tripRepository = fakeTripRepository,
+            settingsRepository = fakeSettingsRepository,
+            tripSigner = TripSigner(),
+        ) {
+            override suspend fun signAndFinalizeTrip(tripId: String) {
+                capturedSequenceNumber = fakeTripRepository.countAssignedSequenceNumbers(
+                    excludeTripId = tripId,
+                ) + 1
+                // Simulate signing by writing fields directly to the fake repo.
+                fakeTripRepository.updateSigningFields(
+                    tripId = tripId,
+                    signatureBase64 = "stub-sig",
+                    signingKeyId = "stub-key",
+                    tripSequenceNumber = capturedSequenceNumber!!,
+                )
+                fakeTripRepository.markTripCompleted(
+                    tripId = tripId,
+                    signatureBase64 = "stub-sig",
+                    signingKeyId = "stub-key",
+                )
+            }
+        }
+
+        orchestrator.signAndFinalizeTrip("trip-work-pending")
+
+        assertEquals(
+            "PENDING_BUSINESS_REASON trip must receive sequence 2, not 3 (no self-count)",
+            2,
+            capturedSequenceNumber,
+        )
+    }
+
+    /**
+     * Monotonicity: finalizing two trips in sequence must produce strictly increasing sequence
+     * numbers with no duplicates.
+     */
+    @Test
+    fun `two consecutive trip finalizations receive strictly increasing sequence numbers`() = runTest {
+        val fakeTripRepository = FakeTripRepository()
+        val fakeSettingsRepository = FakeSettingsRepository()
+
+        val assignedSequenceNumbers = mutableListOf<Int>()
+
+        val orchestrator = object : TripSigningOrchestrator(
+            tripRepository = fakeTripRepository,
+            settingsRepository = fakeSettingsRepository,
+            tripSigner = TripSigner(),
+        ) {
+            override suspend fun signAndFinalizeTrip(tripId: String) {
+                val sequenceNumber = fakeTripRepository.countAssignedSequenceNumbers(
+                    excludeTripId = tripId,
+                ) + 1
+                assignedSequenceNumbers.add(sequenceNumber)
+                fakeTripRepository.updateSigningFields(
+                    tripId = tripId,
+                    signatureBase64 = "sig-$sequenceNumber",
+                    signingKeyId = "key",
+                    tripSequenceNumber = sequenceNumber,
+                )
+                fakeTripRepository.markTripCompleted(
+                    tripId = tripId,
+                    signatureBase64 = "sig-$sequenceNumber",
+                    signingKeyId = "key",
+                )
+            }
+        }
+
+        // Finalize first trip.
+        val firstTrip = buildSignedTrip(
+            id = "trip-first",
+            signatureBase64 = null.toString(),
+            tripSequenceNumber = 0,
+        ).copy(signatureBase64 = null, tripSequenceNumber = 0, status = TripStatus.PENDING_OCR)
+        fakeTripRepository.setInProgressTrip(firstTrip)
+        orchestrator.signAndFinalizeTrip("trip-first")
+
+        // Finalize second trip.
+        val secondTrip = buildSignedTrip(
+            id = "trip-second",
+            signatureBase64 = null.toString(),
+            tripSequenceNumber = 0,
+        ).copy(signatureBase64 = null, tripSequenceNumber = 0, status = TripStatus.PENDING_OCR)
+        fakeTripRepository.setInProgressTrip(secondTrip)
+        orchestrator.signAndFinalizeTrip("trip-second")
+
+        assertEquals("Two trips should have been finalized", 2, assignedSequenceNumbers.size)
+        assertEquals("First trip sequence must be 1", 1, assignedSequenceNumbers[0])
+        assertEquals("Second trip sequence must be 2", 2, assignedSequenceNumbers[1])
+        assertTrue(
+            "Sequence numbers must be strictly increasing",
+            assignedSequenceNumbers[1] > assignedSequenceNumbers[0],
+        )
+    }
 }

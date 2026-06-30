@@ -2,6 +2,7 @@ package com.mileagetracker.app.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.mileagetracker.app.BuildConfig
 import com.mileagetracker.app.data.logging.DebugLogExportResult
 import com.mileagetracker.app.data.logging.DebugLogFileProvider
 import com.mileagetracker.app.domain.model.PhotoRetentionMode
@@ -26,11 +27,19 @@ sealed interface DebugLogExportUiResult {
     data class Failure(val message: String) : DebugLogExportUiResult
 }
 
-/** T-001 blueprint §5, row 7: photo-retention toggle + Bluetooth vehicle-trigger toggle. */
+/**
+ * T-001 blueprint §5, row 7: photo-retention toggle + Bluetooth vehicle-trigger toggle.
+ *
+ * [isDebugLogExportAvailable] is true only in DEBUG builds (T-030 P0.4 Option A). The Settings
+ * screen hides the "Export debugging logs" row entirely in release builds so the entry point is
+ * never reachable by end-users.
+ * PII-redaction / FileProvider-share deferred to a pre-Play-Store task (T-038 / T-030 P0.4 follow-up).
+ */
 data class SettingsUiState(
     val photoRetentionMode: PhotoRetentionMode = PhotoRetentionMode.SAVED,
     val isBluetoothVehicleTriggerEnabled: Boolean = false,
     val lastDebugLogExportResult: DebugLogExportUiResult = DebugLogExportUiResult.Idle,
+    val isDebugLogExportAvailable: Boolean = false,
 )
 
 @HiltViewModel
@@ -51,6 +60,9 @@ class SettingsViewModel @Inject constructor(
             photoRetentionMode = photoRetentionMode,
             isBluetoothVehicleTriggerEnabled = isBluetoothEnabled,
             lastDebugLogExportResult = debugLogExportResult,
+            // T-030 P0.4 Option A: expose availability flag so the Compose layer can gate the UI
+            // row without referencing BuildConfig directly (keeps BuildConfig out of the UI layer).
+            isDebugLogExportAvailable = BuildConfig.DEBUG,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -74,6 +86,14 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun onExportDebugLogClicked() {
+        // T-030 P0.4 Option A: defense-in-depth guard. The Settings screen already hides this
+        // row in release builds, but guard here too in case the call site is ever reached via
+        // deep-link or future refactor. No-op in release so no PII is ever copied to Downloads.
+        // PII-redaction / FileProvider-share deferred to a pre-Play-Store task (T-038 / T-030 P0.4 follow-up).
+        if (!BuildConfig.DEBUG) {
+            Timber.tag("MT-UI").w("SettingsScreen: onExportDebugLogClicked called in release build — ignoring")
+            return
+        }
         Timber.tag("MT-UI").i("SettingsScreen: Export debug log button clicked")
         viewModelScope.launch {
             val exportResult = withContext(Dispatchers.IO) {

@@ -45,4 +45,23 @@ data class Trip(
      * classification notification title so manual trips are never mislabelled "Detected".
      */
     val isManualStart: Boolean,
-)
+) {
+    /**
+     * T-033: derived flag — true when this trip has a non-null, non-empty signature (i.e. the
+     * signing fields have been written by [TripSigningOrchestrator]). No DB change; no live
+     * ECDSA verification — this is a local presence check only.
+     */
+    val isSigned: Boolean get() = !signatureBase64.isNullOrEmpty()
+
+    /**
+     * T-033: derived integrity status for display purposes. No live ECDSA verify — presence
+     * check only. A trip that is COMPLETED but unsigned (signing failure path) surfaces as
+     * UNSIGNED so the UI or export layer can flag it without blocking trip completion.
+     */
+    val integrityStatus: TripIntegrityStatus
+        get() = when {
+            status == TripStatus.COMPLETED && !isSigned -> TripIntegrityStatus.UNSIGNED
+            isSigned -> TripIntegrityStatus.SIGNED
+            else -> TripIntegrityStatus.NOT_FINALIZED
+        }
+}

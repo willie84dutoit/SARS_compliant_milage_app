@@ -53,14 +53,19 @@ fun SettingsScreen(
                 )
             }
 
-            Button(onClick = viewModel::onExportDebugLogClicked) {
-                Text("Export debugging logs")
-            }
+            // T-030 P0.4 Option A (debug-only): the export button and its result feedback are
+            // hidden entirely in release builds — the row is unreachable by end-users.
+            // PII-redaction / FileProvider-share deferred to a pre-Play-Store task (T-038 / T-030 P0.4 follow-up).
+            if (uiState.isDebugLogExportAvailable) {
+                Button(onClick = viewModel::onExportDebugLogClicked) {
+                    Text("Export debugging logs")
+                }
 
-            when (val result = uiState.lastDebugLogExportResult) {
-                is DebugLogExportUiResult.Success -> Text("Debug log exported to ${result.filename}")
-                is DebugLogExportUiResult.Failure -> Text("Debug log export failed: ${result.message}")
-                DebugLogExportUiResult.Idle -> Unit
+                when (val result = uiState.lastDebugLogExportResult) {
+                    is DebugLogExportUiResult.Success -> Text("Debug log exported to ${result.filename}")
+                    is DebugLogExportUiResult.Failure -> Text("Debug log export failed: ${result.message}")
+                    DebugLogExportUiResult.Idle -> Unit
+                }
             }
         }
     }

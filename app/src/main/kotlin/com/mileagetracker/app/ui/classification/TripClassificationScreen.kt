@@ -67,6 +67,11 @@ import java.util.concurrent.Executors
 private const val CLASSIFICATION_SCREEN_LOG_TAG = "MT-UI"
 private const val OCR_TEMP_DIRECTORY_NAME = "ocr_temp"
 
+// T-031 N-2: cap the long edge of the decoded odometer bitmap at this value to stay well under
+// the ~48 MB budget a 12 MP full-res ARGB_8888 image would consume. 2048 px is sufficient
+// for ML Kit text recognition and eliminates the 2× peak during rotation.
+private const val MAX_ODOMETER_BITMAP_LONG_EDGE_PX = 2048
+
 /**
  * Unified trip-completion screen: classification + odometer photo + reading in one place,
  * one Save. Replaces the former two-screen flow (TripClassificationScreen → OdometerCaptureScreen).
@@ -364,6 +369,11 @@ fun TripClassificationScreen(
                         viewModel.captureAndRunOcr(capturedBitmap, capturedFileUri)
                     },
                     onDismiss = { viewModel.onCameraOverlayDismissed() },
+                    // T-031 N-3: route capture/decode errors to the ViewModel so the user
+                    // sees visible feedback (error text + retake affordance stays available).
+                    onCaptureOrDecodeError = { errorMessage ->
+                        viewModel.onCaptureOrDecodeError(errorMessage)
+                    },
                 )
             }
         }
@@ -385,6 +395,9 @@ private fun InlineCameraOverlay(
     tripId: String,
     onBitmapReady: (Bitmap, String) -> Unit,
     onDismiss: () -> Unit,
+    // T-031 N-3: caller supplies the error handler so the ViewModel (which holds error state)
+    // is reached without threading it through an intermediate layer.
+    onCaptureOrDecodeError: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -417,10 +430,15 @@ private fun InlineCameraOverlay(
             boundCameraProviderHolder = boundCameraProviderHolder,
             onBitmapReady = onBitmapReady,
             onCaptureError = { captureException ->
+                // T-031 N-3: log and propagate so the ViewModel can close the overlay
+                // and show the user visible error feedback.
                 Timber.tag(CLASSIFICATION_SCREEN_LOG_TAG).e(
                     captureException,
-                    "InlineCameraOverlay: ImageCapture failed for tripId=%s",
+                    "InlineCameraOverlay: ImageCapture/decode failed for tripId=%s",
                     tripId,
+                )
+                onCaptureOrDecodeError(
+                    captureException.message ?: "Camera capture failed",
                 )
             },
         )
@@ -510,14 +528,57 @@ private fun CameraPreviewWithCapture(
                     cameraExecutor,
                     object : ImageCapture.OnImageSavedCallback {
                         override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                            val rawBitmap = BitmapFactory.decodeFile(outputFile.absolutePath)
-                            if (rawBitmap == null) {
+                            // T-031 N-2: Downsample on decode to avoid holding a full-res
+                            // bitmap (≈48 MB ARGB_8888 for 12 MP) in Compose state when it
+                            // is only ever displayed as a small thumbnail.
+                            //
+                            // Resolution contract:
+                            //   Long edge is capped at MAX_ODOMETER_BITMAP_LONG_EDGE_PX (2048).
+                            //   This is sufficient for ML Kit text recognition (which does not
+                            //   need full resolution) and eliminates the ~2× peak during
+                            //   rotation that caused OOM on low-RAM devices.
+                            //   The downsampled bitmap is fed to both the thumbnail AND OCR —
+                            //   no separate full-res decode is performed.
+                            val boundsOnlyOptions = BitmapFactory.Options().apply {
+                                inJustDecodeBounds = true
+                            }
+                            BitmapFactory.decodeFile(outputFile.absolutePath, boundsOnlyOptions)
+                            val rawImageWidth = boundsOnlyOptions.outWidth
+                            val rawImageHeight = boundsOnlyOptions.outHeight
+
+                            val longEdgePixels = maxOf(rawImageWidth, rawImageHeight)
+                            val computedSampleSize = if (longEdgePixels > MAX_ODOMETER_BITMAP_LONG_EDGE_PX) {
+                                var sampleSize = 1
+                                while (longEdgePixels / (sampleSize * 2) > MAX_ODOMETER_BITMAP_LONG_EDGE_PX) {
+                                    sampleSize *= 2
+                                }
+                                sampleSize * 2
+                            } else {
+                                1
+                            }
+
+                            val downsampledOptions = BitmapFactory.Options().apply {
+                                inSampleSize = computedSampleSize
+                            }
+                            val downsampledBitmap = BitmapFactory.decodeFile(
+                                outputFile.absolutePath,
+                                downsampledOptions,
+                            )
+                            if (downsampledBitmap == null) {
                                 Timber.tag(CLASSIFICATION_SCREEN_LOG_TAG).e(
-                                    "CameraPreviewWithCapture: BitmapFactory returned null for %s",
+                                    "CameraPreviewWithCapture: BitmapFactory returned null for %s — notifying caller",
                                     outputFile.absolutePath,
+                                )
+                                onCaptureError(
+                                    ImageCaptureException(
+                                        ImageCapture.ERROR_UNKNOWN,
+                                        "Bitmap decode returned null for ${outputFile.absolutePath}",
+                                        null,
+                                    ),
                                 )
                                 return
                             }
+
                             val capturedRotationDegrees = imageCaptureUseCase.targetRotation.let {
                                 when (it) {
                                     android.view.Surface.ROTATION_0 -> 90
@@ -532,12 +593,12 @@ private fun CameraPreviewWithCapture(
                                     postRotate(capturedRotationDegrees.toFloat())
                                 }
                                 Bitmap.createBitmap(
-                                    rawBitmap, 0, 0,
-                                    rawBitmap.width, rawBitmap.height,
+                                    downsampledBitmap, 0, 0,
+                                    downsampledBitmap.width, downsampledBitmap.height,
                                     rotationMatrix, true,
                                 )
                             } else {
-                                rawBitmap
+                                downsampledBitmap
                             }
                             onBitmapReady(uprightBitmap, outputFile.toURI().toString())
                         }

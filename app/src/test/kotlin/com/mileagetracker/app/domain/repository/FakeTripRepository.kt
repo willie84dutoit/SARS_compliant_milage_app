@@ -3,6 +3,7 @@ package com.mileagetracker.app.domain.repository
 import com.mileagetracker.app.domain.model.Trip
 import com.mileagetracker.app.domain.model.TripClassification
 import com.mileagetracker.app.domain.model.TripStatus
+import com.mileagetracker.app.domain.repository.TripWriteResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -53,19 +54,39 @@ class FakeTripRepository : TripRepository {
         tripId: String,
         classification: TripClassification,
         businessReason: String?,
-    ) {
-        val existingTrip = inProgressTripState.value?.takeIf { it.id == tripId } ?: return
-        inProgressTripState.value = existingTrip.copy(classification = classification, businessReason = businessReason)
+    ): TripWriteResult {
+        val existingTrip = findTrip(tripId) ?: return TripWriteResult.TripNotFound
+        if (existingTrip.isSigned) return TripWriteResult.RejectedSignedRow
+        updateInPlace(existingTrip.copy(classification = classification, businessReason = businessReason))
+        return TripWriteResult.Success
     }
 
-    override suspend fun updateBusinessReason(tripId: String, businessReason: String) {
-        val existingTrip = inProgressTripState.value?.takeIf { it.id == tripId } ?: return
-        inProgressTripState.value = existingTrip.copy(businessReason = businessReason)
+    override suspend fun updateBusinessReason(tripId: String, businessReason: String): TripWriteResult {
+        val existingTrip = findTrip(tripId) ?: return TripWriteResult.TripNotFound
+        if (existingTrip.isSigned) return TripWriteResult.RejectedSignedRow
+        updateInPlace(existingTrip.copy(businessReason = businessReason))
+        return TripWriteResult.Success
     }
 
-    override suspend fun updateVerifiedOdometer(tripId: String, verifiedOdometerKm: Double) {
-        val existingTrip = inProgressTripState.value?.takeIf { it.id == tripId } ?: return
-        inProgressTripState.value = existingTrip.copy(verifiedOdometerKm = verifiedOdometerKm)
+    override suspend fun updateVerifiedOdometer(tripId: String, verifiedOdometerKm: Double): TripWriteResult {
+        val existingTrip = findTrip(tripId) ?: return TripWriteResult.TripNotFound
+        if (existingTrip.isSigned) return TripWriteResult.RejectedSignedRow
+        updateInPlace(existingTrip.copy(verifiedOdometerKm = verifiedOdometerKm))
+        return TripWriteResult.Success
+    }
+
+    private fun findTrip(tripId: String): Trip? =
+        inProgressTripState.value?.takeIf { it.id == tripId }
+            ?: tripHistoryState.value.firstOrNull { it.id == tripId }
+
+    private fun updateInPlace(updatedTrip: Trip) {
+        if (inProgressTripState.value?.id == updatedTrip.id) {
+            inProgressTripState.value = updatedTrip
+        } else {
+            tripHistoryState.value = tripHistoryState.value.map {
+                if (it.id == updatedTrip.id) updatedTrip else it
+            }
+        }
     }
 
     override suspend fun markTripCompleted(tripId: String, signatureBase64: String, signingKeyId: String) {
@@ -121,12 +142,15 @@ class FakeTripRepository : TripRepository {
         )
     }
 
-    override suspend fun countFinalizedTrips(): Int {
+    override suspend fun countAssignedSequenceNumbers(excludeTripId: String): Int {
+        // Mirrors the DAO query: trip_sequence_number > 0 AND id != excludeTripId.
+        // A PENDING_BUSINESS_REASON trip has tripSequenceNumber == 0 until it is signed,
+        // so it is correctly excluded without any special-casing on status.
         val inProgressCount = inProgressTripState.value
-            ?.let { if (it.status == TripStatus.COMPLETED || it.status == TripStatus.PENDING_BUSINESS_REASON) 1 else 0 }
+            ?.let { if (it.tripSequenceNumber > 0 && it.id != excludeTripId) 1 else 0 }
             ?: 0
         val historyCount = tripHistoryState.value.count {
-            it.status == TripStatus.COMPLETED || it.status == TripStatus.PENDING_BUSINESS_REASON
+            it.tripSequenceNumber > 0 && it.id != excludeTripId
         }
         return inProgressCount + historyCount
     }

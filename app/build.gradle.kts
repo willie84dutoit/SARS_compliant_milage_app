@@ -49,6 +49,9 @@ android {
 
     buildFeatures {
         compose = true
+        // T-030 P0.4 Option A: BuildConfig.DEBUG gates FileLoggingTree + debug-log export.
+        // Required explicitly because the AGP 8.x default is buildConfig = false.
+        buildConfig = true
     }
 
     packaging {

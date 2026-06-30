@@ -6,6 +6,7 @@ import com.mileagetracker.app.domain.model.Trip
 import com.mileagetracker.app.domain.model.TripClassification
 import com.mileagetracker.app.domain.model.TripStatus
 import com.mileagetracker.app.domain.repository.TripRepository
+import com.mileagetracker.app.domain.repository.TripWriteResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import timber.log.Timber
@@ -51,40 +52,72 @@ class TripRepositoryImpl @Inject constructor(
         tripDao.insertTrip(trip.toEntity())
     }
 
+    /**
+     * T-033: guarded classification write. The atomic DAO UPDATE only fires when
+     * signature_base64 IS NULL — a signed row is left untouched and [TripWriteResult.RejectedSignedRow]
+     * is returned. Prefer this guarded @Query over the whole-entity @Update to avoid TOCTOU between
+     * a read and write and to prevent accidentally overwriting signing fields.
+     */
     override suspend fun updateClassification(
         tripId: String,
         classification: TripClassification,
         businessReason: String?,
-    ) {
-        val existingTrip = tripDao.getTripById(tripId) ?: run {
-            Timber.tag("MT-Repository").e("updateClassification called for unknown tripId=%s", tripId)
-            throw IllegalStateException("updateClassification called for unknown tripId=$tripId")
-        }
-        val updatedAt = System.currentTimeMillis()
-        tripDao.updateTrip(
-            existingTrip.copy(
-                classification = classification,
-                businessReason = businessReason,
-                updatedAt = updatedAt,
-            ),
+    ): TripWriteResult {
+        val rowsAffected = tripDao.updateClassificationGuarded(
+            tripId = tripId,
+            classification = classification,
+            businessReason = businessReason,
+            updatedAt = System.currentTimeMillis(),
         )
+        return interpretGuardedWriteResult(tripId = tripId, rowsAffected = rowsAffected, caller = "updateClassification")
     }
 
-    override suspend fun updateBusinessReason(tripId: String, businessReason: String) {
-        tripDao.updateBusinessReason(tripId, businessReason, updatedAt = System.currentTimeMillis())
+    /**
+     * T-033: guarded business-reason write — blocked on signed rows.
+     */
+    override suspend fun updateBusinessReason(tripId: String, businessReason: String): TripWriteResult {
+        val rowsAffected = tripDao.updateBusinessReasonGuarded(
+            tripId = tripId,
+            businessReason = businessReason,
+            updatedAt = System.currentTimeMillis(),
+        )
+        return interpretGuardedWriteResult(tripId = tripId, rowsAffected = rowsAffected, caller = "updateBusinessReason")
     }
 
-    override suspend fun updateVerifiedOdometer(tripId: String, verifiedOdometerKm: Double) {
-        val existingTrip = tripDao.getTripById(tripId) ?: run {
-            Timber.tag("MT-Repository").e("updateVerifiedOdometer called for unknown tripId=%s", tripId)
-            throw IllegalStateException("updateVerifiedOdometer called for unknown tripId=$tripId")
-        }
-        tripDao.updateTrip(
-            existingTrip.copy(
-                verifiedOdometerKm = verifiedOdometerKm,
-                updatedAt = System.currentTimeMillis(),
-            ),
+    /**
+     * T-033: guarded verified-odometer write — blocked on signed rows. Uses a dedicated atomic
+     * @Query UPDATE rather than a read-modify-write @Update to avoid TOCTOU and prevent
+     * overwriting signing fields on a row that got signed between the read and the write.
+     */
+    override suspend fun updateVerifiedOdometer(tripId: String, verifiedOdometerKm: Double): TripWriteResult {
+        val rowsAffected = tripDao.updateVerifiedOdometerGuarded(
+            tripId = tripId,
+            verifiedOdometerKm = verifiedOdometerKm,
+            updatedAt = System.currentTimeMillis(),
         )
+        return interpretGuardedWriteResult(tripId = tripId, rowsAffected = rowsAffected, caller = "updateVerifiedOdometer")
+    }
+
+    /**
+     * Resolves the result of a guarded (signature_base64 IS NULL) UPDATE that returned [rowsAffected].
+     * When zero rows were affected the trip is fetched once to distinguish "not found" from "signed".
+     * Logs at the appropriate level and returns the correct [TripWriteResult] — never swallows.
+     */
+    private suspend fun interpretGuardedWriteResult(tripId: String, rowsAffected: Int, caller: String): TripWriteResult {
+        if (rowsAffected > 0) return TripWriteResult.Success
+        val tripRow = tripDao.getTripById(tripId)
+        return if (tripRow == null) {
+            Timber.tag("MT-Repository").e("%s: tripId=%s not found in Room", caller, tripId)
+            TripWriteResult.TripNotFound
+        } else {
+            Timber.tag("MT-Trip").w(
+                "%s: REJECTED — row is already signed (tripId=%s sequenceNumber=%d)",
+                caller,
+                tripId,
+                tripRow.tripSequenceNumber,
+            )
+            TripWriteResult.RejectedSignedRow
+        }
     }
 
     override suspend fun markTripCompleted(tripId: String, signatureBase64: String, signingKeyId: String) {
@@ -121,7 +154,8 @@ class TripRepositoryImpl @Inject constructor(
         )
     }
 
-    override suspend fun countFinalizedTrips(): Int = tripDao.countFinalizedTrips()
+    override suspend fun countAssignedSequenceNumbers(excludeTripId: String): Int =
+        tripDao.countAssignedSequenceNumbers(excludeTripId)
 
     override suspend fun getMostRecentlySignedTrip(): Trip? =
         tripDao.getMostRecentlySignedTrip()?.toDomain()
@@ -130,20 +164,40 @@ class TripRepositoryImpl @Inject constructor(
         tripDao.updateStartLocationIfUnset(tripId, latitude, longitude, updatedAt = System.currentTimeMillis())
     }
 
+    /**
+     * T-033: guarded — end-location is a content field; blocked on signed rows.
+     * Result is intentionally dropped here: the foreground service is the sole caller, and a
+     * signed row at this point means the trip completed concurrently (harmless race; no UI action needed).
+     */
     override suspend fun updateEndLocation(tripId: String, latitude: Double, longitude: Double) {
-        tripDao.updateEndLocation(tripId, latitude, longitude, updatedAt = System.currentTimeMillis())
+        val rowsAffected = tripDao.updateEndLocationGuarded(tripId, latitude, longitude, updatedAt = System.currentTimeMillis())
+        if (rowsAffected == 0) {
+            Timber.tag("MT-Trip").w("updateEndLocation: 0 rows affected for tripId=%s (signed or not found)", tripId)
+        }
     }
 
+    /**
+     * T-033: guarded — distance is a content field; blocked on signed rows.
+     */
     override suspend fun updateDistanceKm(tripId: String, distanceKm: Double) {
-        tripDao.updateDistanceKm(tripId, distanceKm, updatedAt = System.currentTimeMillis())
+        val rowsAffected = tripDao.updateDistanceKmGuarded(tripId, distanceKm, updatedAt = System.currentTimeMillis())
+        if (rowsAffected == 0) {
+            Timber.tag("MT-Trip").w("updateDistanceKm: 0 rows affected for tripId=%s (signed or not found)", tripId)
+        }
     }
 
     override suspend fun updateStatus(tripId: String, status: TripStatus) {
         tripDao.updateTripStatus(tripId, status, updatedAt = System.currentTimeMillis())
     }
 
+    /**
+     * T-033: guarded — end-timestamp is a content field; blocked on signed rows.
+     */
     override suspend fun updateEndTimestamp(tripId: String, endTimestampEpochMillis: Long) {
-        tripDao.updateEndTimestamp(tripId, endTimestampEpochMillis, updatedAt = System.currentTimeMillis())
+        val rowsAffected = tripDao.updateEndTimestampGuarded(tripId, endTimestampEpochMillis, updatedAt = System.currentTimeMillis())
+        if (rowsAffected == 0) {
+            Timber.tag("MT-Trip").w("updateEndTimestamp: 0 rows affected for tripId=%s (signed or not found)", tripId)
+        }
     }
 
     private fun TripEntity.toDomain(): Trip = Trip(

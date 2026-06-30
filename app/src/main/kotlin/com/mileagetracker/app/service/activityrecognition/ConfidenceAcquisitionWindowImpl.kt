@@ -34,8 +34,23 @@ class ConfidenceAcquisitionWindowImpl @Inject constructor(
     private val bluetoothDiagnosticsSnapshot: BluetoothDiagnosticsSnapshot,
 ) : ConfidenceAcquisitionWindow, VehicleEntryConfidenceGateway {
 
-    private var timeoutJob: Job? = null
-    private var maxConfidenceSeenInWindow: Int = 0
+    // P0.2: Both fields are mutated from the Android main thread (broadcast-receiver callbacks
+    // call startWindow / onConfidenceReading / cancel, which are non-suspend and therefore cannot
+    // use withLock) AND read from the Dispatchers.Default-backed timeout coroutine that calls
+    // fireRetryExhausted. @Volatile gives the cross-thread visibility guarantee that eliminates
+    // the data race without requiring the callers to be suspend functions:
+    //   - timeoutJob: single writer (startWindow / cancel / fireRetryExhausted, always one at a
+    //     time on main), @Volatile ensures the Default-thread reader in fireRetryExhausted sees
+    //     the latest reference.
+    //   - maxConfidenceSeenInWindow: only onConfidenceReading (main thread) performs the
+    //     read-modify-write via maxOf(); fireRetryExhausted (Default thread) only reads it once.
+    //     Because the write side is single-threaded (main), @Volatile is sufficient — there is no
+    //     lost-update risk, only a visibility risk, which @Volatile resolves.
+    // A Mutex is not used because withLock is suspend and cannot be called from the non-suspend
+    // overrides. Dispatchers.Main.immediate was considered but rejected because it requires a main
+    // dispatcher to be installed, which breaks plain-JVM unit tests that use TestScope.
+    @Volatile private var timeoutJob: Job? = null
+    @Volatile private var maxConfidenceSeenInWindow: Int = 0
     private val resultFlow = MutableSharedFlow<TripStartEvent>(extraBufferCapacity = 1)
 
     override fun onVehicleEntryDetected(enteredAtEpochMillis: Long) {

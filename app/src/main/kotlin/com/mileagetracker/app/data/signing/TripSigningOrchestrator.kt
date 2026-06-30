@@ -70,9 +70,12 @@ open class TripSigningOrchestrator @Inject constructor(
 
         val previousChainTailHash = settingsRepository.getChainTailHash()
 
-        // countFinalizedTrips is the count BEFORE this trip reaches finalized status, so
-        // tripSequenceNumber = count + 1 is this trip's position in the finalization sequence.
-        val assignedSequenceNumber = tripRepository.countFinalizedTrips() + 1
+        // Count trips whose sequence number has already been assigned (trip_sequence_number > 0),
+        // excluding this trip (which has sequence 0 until now). A WORK trip currently in
+        // PENDING_BUSINESS_REASON has sequence 0, so it does not count itself — fixing the
+        // duplicate-sequence bug (T-034). The single-writer assumption holds for v1: only one
+        // trip is finalized at a time; an atomic counter is deferred to Phase-2.
+        val assignedSequenceNumber = tripRepository.countAssignedSequenceNumbers(excludeTripId = tripId) + 1
 
         val signingResult = tripSigner.signTrip(
             trip = tripToSign,
@@ -149,6 +152,18 @@ open class TripSigningOrchestrator @Inject constructor(
      *
      * If no signed trip exists yet (first ever launch, or all trips predate signing), the DataStore
      * tail is left null — the next signing call will treat that as the genesis link.
+     */
+    /**
+     * THREAT-MODEL LIMITATION (H-1, accepted by design): this self-heal rebuilds the chain tail from
+     * whatever signed trips currently survive in Room. It therefore CANNOT detect local truncation or
+     * back-dating: if the most recent signed trips are deleted from the device's database, the next
+     * cold start simply rebuilds a valid-looking tail from the remaining trips and continues. The
+     * hash chain proves that surviving trips were not individually edited after signing (each link's
+     * prevTail still matches), but it does NOT prove that NO trips were removed from the end of the
+     * chain. Detecting deletion/truncation requires an append-only external witness that records the
+     * highest sequence number seen — i.e. the Phase-2 backend gap-analysis (see T-032). On-device
+     * alone, end-of-chain truncation is undetectable; do not represent the local logbook as
+     * truncation-proof.
      */
     open suspend fun rebuildChainTailFromRoom() {
         val mostRecentlySignedTrip = tripRepository.getMostRecentlySignedTrip()
