@@ -38,8 +38,15 @@ class TripClassificationNotificationBuilder @Inject constructor(
      * H-2 fix: [isManualStart] drives the notification title. A manually started trip was not
      * "detected" — calling it so is misleading. The body text is identical for both origins
      * because the action (classify the trip) is the same.
+     *
+     * T-039 item 9: [isOverdueReminder] selects the post-30s-timeout variant — `setOngoing(true)`
+     * (cannot be swipe-dismissed, matching the "persistent... reminder" ruling) and
+     * `setAutoCancel(false)` (tapping it opens the classification screen but the reminder must
+     * stay live until the trip is actually classified, not just opened-and-abandoned again).
+     * The initial on-stop notification is unaffected — same `setAutoCancel(true)`/non-ongoing
+     * behavior as before this change.
      */
-    fun build(tripId: String, isManualStart: Boolean = false): Notification {
+    fun build(tripId: String, isManualStart: Boolean = false, isOverdueReminder: Boolean = false): Notification {
         val openClassificationIntent = Intent(appContext, MainActivity::class.java).apply {
             action = ACTION_OPEN_TRIP_CLASSIFICATION
             putExtra(EXTRA_TRIP_ID, tripId)
@@ -54,15 +61,21 @@ class TripClassificationNotificationBuilder @Inject constructor(
         )
 
         val notificationTitle = if (isManualStart) "Trip recorded" else "Trip detected"
+        val notificationBodyText = if (isOverdueReminder) {
+            "Still needs classification — tap to mark this trip Work or Private"
+        } else {
+            "Tap to classify this trip as Work or Private"
+        }
 
         return NotificationCompat.Builder(appContext, TripAlertNotificationChannel.CHANNEL_ID)
             .setContentTitle(notificationTitle)
-            .setContentText("Tap to classify this trip as Work or Private")
+            .setContentText(notificationBodyText)
             .setSmallIcon(R.drawable.ic_notification_trip)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setContentIntent(contentIntent)
-            .setAutoCancel(true)
+            .setAutoCancel(!isOverdueReminder)
+            .setOngoing(isOverdueReminder)
             .build()
     }
 

@@ -5,7 +5,23 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import javax.inject.Qualifier
 import javax.inject.Singleton
+
+/**
+ * Qualifier for the [CoroutineScope] that backs
+ * [com.mileagetracker.app.service.notification.ClassificationPromptTimeoutScheduler]'s 30s timer
+ * (T-039 item 9). Mirrors [ConfidenceAcquisitionScope]'s shape exactly — a distinct qualifier
+ * keeps this timer's scope from colliding with any other unqualified `@Singleton CoroutineScope`
+ * binding in the graph (the same M-1-adjacent issue T-039 already fixed for the confidence
+ * window).
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class ClassificationPromptTimeoutScope
 
 /**
  * Singleton Hilt binding for [TripLifecycleStateMachine] (T-001 blueprint §3, updated T-030/P0.3).
@@ -30,5 +46,18 @@ object ServiceModule {
     @Singleton
     fun provideTripLifecycleStateMachine(): TripLifecycleStateMachine {
         return TripLifecycleStateMachine()
+    }
+
+    /**
+     * Backs [com.mileagetracker.app.service.notification.ClassificationPromptTimeoutScheduler]'s
+     * 30s timer (T-039 item 9). CPU-bound delay only, no I/O, so `Dispatchers.Default`;
+     * `SupervisorJob()` so a failure in one trip's timeout does not take down the next one —
+     * same reasoning as [ActivityRecognitionModule]'s `provideConfidenceAcquisitionCoroutineScope`.
+     */
+    @Provides
+    @Singleton
+    @ClassificationPromptTimeoutScope
+    fun provideClassificationPromptTimeoutCoroutineScope(): CoroutineScope {
+        return CoroutineScope(SupervisorJob() + Dispatchers.Default)
     }
 }

@@ -16,6 +16,7 @@ import com.mileagetracker.app.domain.repository.TripPhotoRepository
 import com.mileagetracker.app.domain.repository.TripRepository
 import com.mileagetracker.app.domain.repository.TripWriteResult
 import com.mileagetracker.app.domain.statemachine.TripLifecycleStateMachine
+import com.mileagetracker.app.service.notification.ClassificationPromptTimeoutScheduler
 import com.mileagetracker.app.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -93,6 +94,12 @@ class TripClassificationViewModel @Inject constructor(
     // holds no mutable state (pure transition logic), so sharing a @Singleton instance between
     // this ViewModel and TripTrackingForegroundService is safe.
     private val tripLifecycleStateMachine: TripLifecycleStateMachine,
+    // T-039 item 9: shared @Singleton instance with TripTrackingForegroundService (same sharing
+    // pattern as tripLifecycleStateMachine above) — the service starts the 30s countdown when it
+    // posts the prompt; this ViewModel cancels it the moment the user actually resolves
+    // PENDING_OCR, so a user who responds in time never sees the prompt flip into the persistent
+    // overdue-reminder notification.
+    private val classificationPromptTimeoutScheduler: ClassificationPromptTimeoutScheduler,
 ) : ViewModel() {
 
     private val tripId: String = requireNotNull(savedStateHandle[Screen.TripClassification.ARG_TRIP_ID])
@@ -492,6 +499,10 @@ class TripClassificationViewModel @Inject constructor(
             resolvedStatus,
             tripId,
         )
+        // T-039 item 9: the user has now responded (this method only runs from onSaveClassification's
+        // success path) — cancel the 30s countdown so the prompt never flips into the persistent
+        // overdue-reminder notification for a trip that is no longer pending.
+        classificationPromptTimeoutScheduler.cancelFor(tripId)
         when (resolvedStatus) {
             TripStatus.COMPLETED -> {
                 // T-008: COMPLETED is the signing call site. Orchestrator signs, writes to Room,

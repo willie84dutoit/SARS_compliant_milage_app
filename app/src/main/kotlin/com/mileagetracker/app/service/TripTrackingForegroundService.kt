@@ -26,6 +26,7 @@ import com.mileagetracker.app.domain.statemachine.TripStopEvent
 import com.mileagetracker.app.service.activityrecognition.ActivityRecognitionRegistrar
 import com.mileagetracker.app.service.activityrecognition.ConfidenceAcquisitionWindow
 import com.mileagetracker.app.service.location.TripLocationCallback
+import com.mileagetracker.app.service.notification.ClassificationPromptTimeoutScheduler
 import com.mileagetracker.app.service.notification.TripAlertNotificationChannel
 import com.mileagetracker.app.service.notification.TripClassificationNotificationBuilder
 import dagger.hilt.android.AndroidEntryPoint
@@ -109,6 +110,15 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
     @Inject
     lateinit var confidenceAcquisitionWindow: ConfidenceAcquisitionWindow
 
+    /**
+     * T-039 item 9: shared singleton (also injected into [com.mileagetracker.app.ui.classification.TripClassificationViewModel],
+     * the same sharing pattern already used for [tripLifecycleStateMachine]) so the ViewModel can
+     * cancel a trip's countdown the moment the user actually saves a classification, while this
+     * service owns starting the countdown and reacting to its timeout.
+     */
+    @Inject
+    lateinit var classificationPromptTimeoutScheduler: ClassificationPromptTimeoutScheduler
+
     private val serviceJob: Job = SupervisorJob()
     private val serviceScope = CoroutineScope(serviceJob)
 
@@ -167,6 +177,17 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
         serviceScope.launch {
             confidenceAcquisitionWindow.observeResults().collect { startEvent ->
                 handleAutomaticStartEvent(startEvent)
+            }
+        }
+
+        // T-039 item 9: single, never-resubscribed collector (same shape/reasoning as the
+        // confidenceAcquisitionWindow collector above) for the classification-prompt 30s timeout.
+        // The per-event try/catch lives inside handlePromptTimeout, not wrapped around this whole
+        // `collect`, so one bad timeout event is logged and skipped rather than silently ending
+        // the subscription for the rest of the service's life.
+        serviceScope.launch {
+            classificationPromptTimeoutScheduler.observeTimeouts().collect { timedOutEvent ->
+                handlePromptTimeout(timedOutEvent.tripId)
             }
         }
     }
@@ -271,6 +292,9 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
         }
         safeTeardown("confidenceAcquisitionWindow.cancel") {
             confidenceAcquisitionWindow.cancel()
+        }
+        safeTeardown("classificationPromptTimeoutScheduler.cancel") {
+            classificationPromptTimeoutScheduler.cancel()
         }
         safeTeardown("inactivityTimerJob.cancel") {
             inactivityTimerJob?.cancel()
@@ -539,6 +563,11 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
         // H-2 fix: pass the active trip's manual-start flag so the notification title is correct.
         notifyTripAwaitingClassification(tripId, isManualStart = activeTripIsManualStart)
 
+        // T-039 item 9: start the 30s classification-prompt countdown the moment the prompt is
+        // actually posted. The trip itself is already safe — resolvedStatus was written to Room
+        // above, before this line — so this timer's only job is the notification, never the data.
+        classificationPromptTimeoutScheduler.startTimeoutFor(tripId)
+
         activeTripId = null
         activeTripIsManualStart = false
         accumulatedDistanceMeters = 0.0
@@ -578,6 +607,64 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
             tripId.hashCode(),
             tripClassificationNotificationBuilder.build(tripId, isManualStart = isManualStart),
         )
+    }
+
+    /**
+     * T-039 item 9: fired by [classificationPromptTimeoutScheduler] exactly
+     * [com.mileagetracker.app.service.notification.CLASSIFICATION_PROMPT_TIMEOUT_MILLIS]
+     * (30s) after a prompt was posted with no response. The trip was already safely persisted to
+     * `PENDING_OCR` at stop time — this never re-touches `Trip.status` and never assigns a
+     * default classification. Its only job is to re-post the SAME notification id
+     * (`tripId.hashCode()`, replacing the original prompt in place, not stacking a second one) as
+     * the persistent "needs classification" reminder variant (`isOverdueReminder = true` —
+     * ongoing, non-swipe-dismissable, per the locked ruling).
+     *
+     * Re-checks the trip's current status first: if the user already classified it inside the
+     * 30s window (a race between the timer firing and the user's save landing), the trip is no
+     * longer PENDING_OCR and this is a silent no-op — the reminder must never resurrect a
+     * notification for a trip the user already finished.
+     */
+    private suspend fun handlePromptTimeout(tripId: String) {
+        try {
+            val trip = tripRepository.getTripById(tripId)
+            if (trip == null || trip.status != TripStatus.PENDING_OCR) {
+                Timber.tag("MT-Service").d(
+                    "handlePromptTimeout: tripId=%s no longer PENDING_OCR (status=%s) — skipping reminder",
+                    tripId,
+                    trip?.status,
+                )
+                return
+            }
+
+            val notificationManager = ContextCompat.getSystemService(this, NotificationManager::class.java)
+            if (notificationManager == null) {
+                Timber.tag("MT-Service").e(
+                    "handlePromptTimeout: NotificationManager unavailable, tripId=%s",
+                    tripId,
+                )
+                return
+            }
+            Timber.tag("MT-Trip").i(
+                "TripTrackingForegroundService: classification prompt timed out, posting persistent reminder tripId=%s",
+                tripId,
+            )
+            notificationManager.notify(
+                tripId.hashCode(),
+                tripClassificationNotificationBuilder.build(
+                    tripId,
+                    isManualStart = trip.isManualStart,
+                    isOverdueReminder = true,
+                ),
+            )
+        } catch (cancellationException: CancellationException) {
+            throw cancellationException
+        } catch (unexpectedException: Exception) {
+            Timber.tag("MT-Service").e(
+                unexpectedException,
+                "handlePromptTimeout failed for tripId=%s",
+                tripId,
+            )
+        }
     }
 
     private fun buildPersistentNotification() =

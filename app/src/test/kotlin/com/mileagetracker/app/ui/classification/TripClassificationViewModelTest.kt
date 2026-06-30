@@ -13,12 +13,18 @@ import com.mileagetracker.app.domain.ocr.OdometerOcrResult
 import com.mileagetracker.app.domain.repository.FakeTripRepository
 import com.mileagetracker.app.domain.repository.TripPhotoRepository
 import com.mileagetracker.app.domain.statemachine.TripLifecycleStateMachine
+import com.mileagetracker.app.service.notification.ClassificationPromptTimeoutScheduler
 import com.mileagetracker.app.ui.navigation.Screen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -103,6 +109,12 @@ class TripClassificationViewModelTest {
         fakeOcrClient: FakeClassificationOcrClient = FakeClassificationOcrClient(OdometerOcrResult.NoTextFound),
         fakeTripRepository: FakeTripRepository = FakeTripRepository(),
         fakeTripPhotoRepository: FakeClassificationPhotoRepository = FakeClassificationPhotoRepository(),
+        // T-039 item 9: real instance backed by this test's own TestScope so cancelFor() calls
+        // made by the ViewModel under test are virtual-time-safe and never leak a real timer.
+        // Exposed as a parameter (not always constructed inline) so tests can pass their own
+        // instance and assert on it after the save completes.
+        classificationPromptTimeoutScheduler: ClassificationPromptTimeoutScheduler =
+            ClassificationPromptTimeoutScheduler(coroutineScope = TestScope(testDispatcher)),
     ): TripClassificationViewModel {
         val savedStateHandle = SavedStateHandle(
             mapOf(Screen.TripClassification.ARG_TRIP_ID to testTripId),
@@ -117,6 +129,7 @@ class TripClassificationViewModelTest {
             // P0.3: state machine is now injected; tests supply a real instance directly
             // (it is stateless pure logic, no mocking needed).
             tripLifecycleStateMachine = TripLifecycleStateMachine(),
+            classificationPromptTimeoutScheduler = classificationPromptTimeoutScheduler,
         )
     }
 
@@ -507,6 +520,53 @@ class TripClassificationViewModelTest {
         assertNotNull(
             "saveError should be non-null so the user sees visible feedback",
             errorState.saveError,
+        )
+    }
+
+    // ------------------------------------------------------------------
+    // onSaveClassification — T-039 item 9: 30s classification-prompt timeout
+    // ------------------------------------------------------------------
+
+    /**
+     * Scenario (a) from T-039 item 9: the user responds (saves) before the 30s deadline. The
+     * service would have called `classificationPromptTimeoutScheduler.startTimeoutFor(tripId)`
+     * when it posted the prompt; this test reproduces that call directly (the service itself is
+     * untestable on plain JVM) and asserts the ViewModel's save path cancels it in time, so the
+     * timeout event never fires even once virtual time is advanced well past 30s.
+     */
+    @Test
+    fun `onSaveClassification before 30s cancels the prompt timeout — no overdue event fires`() = runTest {
+        val testScope = TestScope(testDispatcher)
+        val scheduler = ClassificationPromptTimeoutScheduler(coroutineScope = testScope)
+        val emittedTimeouts = mutableListOf<ClassificationPromptTimeoutScheduler.PromptTimedOut>()
+        testScope.launch { scheduler.observeTimeouts().toList(emittedTimeouts) }
+        testScope.runCurrent()
+
+        val fakeRepo = FakeTripRepository()
+        fakeRepo.setInProgressTrip(buildPendingOcrTrip())
+        val viewModel = buildViewModel(
+            fakeTripRepository = fakeRepo,
+            classificationPromptTimeoutScheduler = scheduler,
+        )
+        advanceUntilIdle()
+
+        // Mirrors what TripTrackingForegroundService does the moment it posts the prompt.
+        scheduler.startTimeoutFor(testTripId)
+
+        viewModel.onClassificationSelected(TripClassification.PRIVATE)
+        var savedCallbackFired = false
+        viewModel.onSaveClassification { savedCallbackFired = true }
+        advanceUntilIdle()
+
+        assertTrue("onSaved callback must fire — normal flow, not blocked by the timer", savedCallbackFired)
+
+        // Advance well past where the original 30s deadline would have landed.
+        testScope.advanceTimeBy(60_000)
+        testScope.advanceUntilIdle()
+
+        assertTrue(
+            "Saving before the 30s deadline must cancel the countdown — no overdue-reminder event should fire",
+            emittedTimeouts.isEmpty(),
         )
     }
 }
