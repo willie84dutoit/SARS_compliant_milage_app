@@ -341,6 +341,54 @@ class ExportViewModelTest {
     }
 
     // ------------------------------------------------------------------
+    // Test 7b (T-039 fix): completedTripCount must equal the actual exportable row count, even
+    // when a COMPLETED trip is excluded by CsvExportRules' defensive business-reason filter. Before
+    // the fix, completedTripCount counted raw COMPLETED-status rows (3) while the export itself
+    // would only produce 2 rows (CsvExportRules.buildExportRows drops the blank-reason WORK trip).
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `completedTripCount excludes a COMPLETED work trip with a blank business reason, matching the real export row count`() =
+        runTest {
+            val fakeTripRepository = FakeTripRepository()
+            fakeTripRepository.setTripHistory(
+                listOf(
+                    buildTrip(id = "trip-private-1", classification = TripClassification.PRIVATE),
+                    buildTrip(id = "trip-private-2", classification = TripClassification.PRIVATE),
+                    buildTrip(
+                        id = "trip-work-blank-reason",
+                        classification = TripClassification.WORK,
+                        businessReason = null,
+                    ),
+                ),
+            )
+            val fakeCsvWriter = FakeCsvWriter(buildDefaultSuccessResult())
+            val viewModel = buildViewModel(fakeTripRepository, fakeCsvWriter)
+
+            viewModel.uiState.test {
+                advanceUntilIdle()
+                val settledState = expectMostRecentItem()
+                assertEquals(
+                    "completedTripCount must match CsvExportRules.buildExportRows, not raw COMPLETED count (3)",
+                    2,
+                    settledState.completedTripCount,
+                )
+
+                viewModel.onExportRequested()
+                awaitItem() // isExportInProgress = true
+                advanceUntilIdle()
+
+                val resultState = awaitItem()
+                val successResult = resultState.lastExportResult as ExportResult.Success
+                assertEquals(
+                    "actual export rowCount must equal the pre-export completedTripCount",
+                    settledState.completedTripCount,
+                    successResult.rowCount,
+                )
+            }
+        }
+
+    // ------------------------------------------------------------------
     // Test 7 (T-032 Half A / Pass 2): fallback-with-warning — CSV still exported, sidecar wasn't,
     // and the loud warning message is surfaced on the success result rather than blocking export.
     // ------------------------------------------------------------------

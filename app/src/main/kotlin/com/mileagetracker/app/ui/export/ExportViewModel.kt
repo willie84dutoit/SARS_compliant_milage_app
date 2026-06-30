@@ -29,6 +29,16 @@ import javax.inject.Inject
  * [TripRepository.observeTripHistory] so the screen can disable the Export button and show a
  * meaningful empty-state message when there are no completed trips to export.
  *
+ * T-039 fix (count-vs-export TOCTOU): [ExportUiState.completedTripCount] is now the number of
+ * rows [CsvExportRules.buildExportRows] would actually produce from the observed history, not
+ * the raw count of COMPLETED-status trips. [CsvExportRules.buildExportRows] applies a defensive
+ * second filter beyond status == COMPLETED (a WORK trip's business reason must be non-blank,
+ * see [com.mileagetracker.app.domain.classification.ClassificationRules.isBusinessReasonSatisfied]),
+ * so a raw status count could previously disagree with the true exportable row count and leave
+ * the button enabled while the export produced zero rows. Routing both the count and the actual
+ * export through the same [CsvExportRules.buildExportRows] predicate keeps the two in sync by
+ * construction — the predicate is defined exactly once in the domain layer.
+ *
  * T-032 Half A / Pass 2: [Success] now also reports the integrity sidecar filenames (when
  * written) and [Success.integrityWarning] (the fallback-with-warning path — CSV exported fine,
  * but no sidecar could be generated because the signing public key was unreadable).
@@ -48,7 +58,11 @@ sealed interface ExportResult {
 data class ExportUiState(
     val isExportInProgress: Boolean = false,
     val lastExportResult: ExportResult = ExportResult.Idle,
-    /** M-3 fix: number of completed trips available for export. */
+    /**
+     * T-039 fix: number of rows [CsvExportRules.buildExportRows] would actually produce from the
+     * currently observed trip history — i.e. the true exportable count, not a raw COMPLETED-status
+     * count. See the class-level doc comment for why this distinction matters.
+     */
     val completedTripCount: Int = 0,
 )
 
@@ -65,11 +79,14 @@ class ExportViewModel @Inject constructor(
     // M-3 fix: combine the mutable export-progress state with the reactive trip-history count so
     // the button disabled state is always in sync with the actual DB state, not a one-shot suspend
     // call that could go stale.
+    // T-039 fix: the count is derived via CsvExportRules.buildExportRows — the exact same
+    // predicate onExportRequested() uses below — instead of a raw completedTrips.size, so the
+    // button-enabled count can never disagree with the real export row count.
     val uiState: StateFlow<ExportUiState> = combine(
         exportProgressAndResult,
         tripRepository.observeTripHistory(),
     ) { progressState, completedTrips ->
-        progressState.copy(completedTripCount = completedTrips.size)
+        progressState.copy(completedTripCount = CsvExportRules.buildExportRows(completedTrips).size)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000),

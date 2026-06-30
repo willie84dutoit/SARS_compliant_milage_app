@@ -3,7 +3,6 @@ package com.mileagetracker.app.ui.classification
 import android.graphics.Bitmap
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
-import com.mileagetracker.app.data.signing.TripSigner
 import com.mileagetracker.app.data.signing.TripSigningOrchestrator
 import com.mileagetracker.app.domain.model.PhotoRetentionMode
 import com.mileagetracker.app.domain.model.Trip
@@ -11,7 +10,6 @@ import com.mileagetracker.app.domain.model.TripClassification
 import com.mileagetracker.app.domain.model.TripStatus
 import com.mileagetracker.app.domain.ocr.OdometerOcrClient
 import com.mileagetracker.app.domain.ocr.OdometerOcrResult
-import com.mileagetracker.app.domain.repository.FakeSettingsRepository
 import com.mileagetracker.app.domain.repository.FakeTripRepository
 import com.mileagetracker.app.domain.repository.TripPhotoRepository
 import com.mileagetracker.app.domain.statemachine.TripLifecycleStateMachine
@@ -418,6 +416,66 @@ class TripClassificationViewModelTest {
     }
 
     // ------------------------------------------------------------------
+    // onSaveClassification — TripWriteResult.RejectedSignedRow (T-039 item 4)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `onSaveClassification when trip is already signed sets finalized saveError and does not call onSaved`() = runTest {
+        // A signed trip's classification write is guarded at the repository layer (T-033) and
+        // returns TripWriteResult.RejectedSignedRow — the ViewModel must surface this distinctly
+        // from TripNotFound rather than silently proceeding as if the save succeeded.
+        val signedTrip = buildPendingOcrTrip().copy(
+            status = TripStatus.COMPLETED,
+            signatureBase64 = "dGVzdC1zaWduYXR1cmU=",
+            signingKeyId = "mileage_tracker_signing_key_v1",
+            tripSequenceNumber = 1,
+        )
+        val fakeRepo = FakeTripRepository()
+        fakeRepo.setInProgressTrip(signedTrip)
+        val viewModel = buildViewModel(fakeTripRepository = fakeRepo)
+        advanceUntilIdle()
+
+        viewModel.onClassificationSelected(TripClassification.PRIVATE)
+
+        var savedCallbackFired = false
+        viewModel.onSaveClassification { savedCallbackFired = true }
+        advanceUntilIdle()
+
+        assertFalse("onSaved callback must not fire when the trip is already signed", savedCallbackFired)
+        assertFalse("isSaving must be reset to false on RejectedSignedRow", viewModel.uiState.value.isSaving)
+        assertEquals(
+            "This trip is finalized and can't be edited",
+            viewModel.uiState.value.saveError,
+        )
+    }
+
+    // ------------------------------------------------------------------
+    // onSaveClassification — TripWriteResult.TripNotFound (T-039 item 4)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `onSaveClassification when trip not found in repository sets saveError and does not call onSaved`() = runTest {
+        // Repository intentionally left empty — getTripById(testTripId) returns null both during
+        // init and inside updateClassification, exercising the TripWriteResult.TripNotFound branch.
+        val fakeRepo = FakeTripRepository()
+        val viewModel = buildViewModel(fakeTripRepository = fakeRepo)
+        advanceUntilIdle()
+
+        viewModel.onClassificationSelected(TripClassification.PRIVATE)
+
+        var savedCallbackFired = false
+        viewModel.onSaveClassification { savedCallbackFired = true }
+        advanceUntilIdle()
+
+        assertFalse("onSaved callback must not fire when the trip is not found", savedCallbackFired)
+        assertFalse("isSaving must be reset to false on TripNotFound", viewModel.uiState.value.isSaving)
+        assertEquals(
+            "Save failed — please try again",
+            viewModel.uiState.value.saveError,
+        )
+    }
+
+    // ------------------------------------------------------------------
     // onCaptureOrDecodeError — T-031 N-3 (visible feedback on decode failure)
     // ------------------------------------------------------------------
 
@@ -498,23 +556,25 @@ private class FakeClassificationPhotoRepository : TripPhotoRepository {
 }
 
 /**
- * Fake [TripSigningOrchestrator] for ViewModel tests. Extends the open class passing stub
- * dependencies to the superclass constructor. [signAndFinalizeTrip] calls
- * [FakeTripRepository.markTripCompleted] with stub signing fields — simulating the "signed
- * successfully" path without touching the Android Keystore (unavailable in plain JVM tests).
+ * Fake [TripSigningOrchestrator] for ViewModel tests, implementing the interface directly
+ * (consistent with this project's "fakes over mocks" convention — see [FakeTripRepository]).
+ * [signAndFinalizeTrip] calls [FakeTripRepository.markTripCompleted] with stub signing fields —
+ * simulating the "signed successfully" path without touching the Android Keystore (unavailable in
+ * plain JVM tests).
  */
 private class FakeClassificationSigningOrchestrator(
     private val fakeTripRepository: FakeTripRepository,
-) : TripSigningOrchestrator(
-    tripRepository = fakeTripRepository,
-    settingsRepository = FakeSettingsRepository(),
-    tripSigner = TripSigner(),
-) {
+) : TripSigningOrchestrator {
+
     override suspend fun signAndFinalizeTrip(tripId: String) {
         fakeTripRepository.markTripCompleted(
             tripId = tripId,
             signatureBase64 = "stub-signature",
             signingKeyId = "stub-key-id",
         )
+    }
+
+    override suspend fun rebuildChainTailFromRoom() {
+        // Not exercised by ViewModel tests — no-op.
     }
 }

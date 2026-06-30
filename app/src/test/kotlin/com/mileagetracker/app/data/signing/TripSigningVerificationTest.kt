@@ -17,13 +17,13 @@ import java.security.MessageDigest
  * T-008 Chunk 5 — signature-chain integrity verification tests.
  *
  * ## What is tested here (JVM unit tests)
- * Chain-link hash progression: given the [TripSigningOrchestrator.computeSha256Hex] output for a
- * trip-1 signature, we verify that the same function would produce the expected `prevTailHash`
+ * Chain-link hash progression: given the [TripSigningOrchestratorImpl.computeSha256Hex] output for
+ * a trip-1 signature, we verify that the same function would produce the expected `prevTailHash`
  * that trip-2's payload must contain. This is pure JVM math — no Keystore involved.
  *
  * We also verify that [TripSigningOrchestrator.rebuildChainTailFromRoom] produces the same hash
- * that [TripSigningOrchestrator.computeSha256Hex] produces directly, confirming that the two call
- * sites share the same implementation.
+ * that [TripSigningOrchestratorImpl.computeSha256Hex] produces directly, confirming that the two
+ * call sites share the same implementation.
  *
  * ## What CANNOT be tested in JVM unit tests (requires instrumented test)
  * Real ECDSA sign + verify against the Android Keystore requires a running Android Keystore
@@ -86,7 +86,7 @@ class TripSigningVerificationTest {
     private fun buildOrchestrator(
         fakeTripRepository: FakeTripRepository = FakeTripRepository(),
         fakeSettingsRepository: FakeSettingsRepository = FakeSettingsRepository(),
-    ) = TripSigningOrchestrator(
+    ) = TripSigningOrchestratorImpl(
         tripRepository = fakeTripRepository,
         settingsRepository = fakeSettingsRepository,
         tripSigner = TripSigner(),
@@ -178,7 +178,7 @@ class TripSigningVerificationTest {
     }
 
     @Test
-    fun `computeSha256Hex output matches TripSigningOrchestrator implementation directly`() {
+    fun `computeSha256Hex output matches TripSigningOrchestratorImpl implementation directly`() {
         // Confirms that the orchestrator delegates to the same computation as the test-local
         // sha256Hex() helper — i.e. standard SHA-256, not a custom hash.
         val testSignature = "VGhpcyBpcyBhIHRlc3Qgc2lnbmF0dXJl"

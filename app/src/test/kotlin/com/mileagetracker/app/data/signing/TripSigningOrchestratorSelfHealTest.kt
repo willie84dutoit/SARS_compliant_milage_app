@@ -17,7 +17,7 @@ import org.junit.Test
  * Tests the cold-start self-heal logic in isolation: no Keystore, no real Room, no DataStore.
  * All dependencies are satisfied by hand-written fakes.
  *
- * Also covers [TripSigningOrchestrator.computeSha256Hex] as a pure-JVM function.
+ * Also covers [TripSigningOrchestratorImpl.computeSha256Hex] as a pure-JVM function.
  */
 class TripSigningOrchestratorSelfHealTest {
 
@@ -56,7 +56,7 @@ class TripSigningOrchestratorSelfHealTest {
     private fun buildOrchestrator(
         fakeTripRepository: FakeTripRepository,
         fakeSettingsRepository: FakeSettingsRepository,
-    ): TripSigningOrchestrator = TripSigningOrchestrator(
+    ): TripSigningOrchestratorImpl = TripSigningOrchestratorImpl(
         tripRepository = fakeTripRepository,
         settingsRepository = fakeSettingsRepository,
         tripSigner = TripSigner(),
@@ -255,43 +255,18 @@ class TripSigningOrchestratorSelfHealTest {
         )
         fakeTripRepository.setInProgressTrip(pendingWorkTrip)
 
-        val fakeSettingsRepository = FakeSettingsRepository()
-        // Set chain tail from the already-signed trip so genesis link is not assumed.
-        fakeSettingsRepository.chainTailHash = "fake-tail-from-trip-1"
-
-        // Use a fake orchestrator subclass that captures the assigned sequence number instead of
-        // calling the real Keystore (which is unavailable in JVM tests).
-        var capturedSequenceNumber: Int? = null
-        val orchestrator = object : TripSigningOrchestrator(
-            tripRepository = fakeTripRepository,
-            settingsRepository = fakeSettingsRepository,
-            tripSigner = TripSigner(),
-        ) {
-            override suspend fun signAndFinalizeTrip(tripId: String) {
-                capturedSequenceNumber = fakeTripRepository.countAssignedSequenceNumbers(
-                    excludeTripId = tripId,
-                ) + 1
-                // Simulate signing by writing fields directly to the fake repo.
-                fakeTripRepository.updateSigningFields(
-                    tripId = tripId,
-                    signatureBase64 = "stub-sig",
-                    signingKeyId = "stub-key",
-                    tripSequenceNumber = capturedSequenceNumber!!,
-                )
-                fakeTripRepository.markTripCompleted(
-                    tripId = tripId,
-                    signatureBase64 = "stub-sig",
-                    signingKeyId = "stub-key",
-                )
-            }
-        }
+        // Use a fake orchestrator that captures the assigned sequence number instead of calling
+        // the real Keystore (which is unavailable in JVM tests). The fake only touches
+        // [FakeTripRepository]; DataStore chain-tail state is irrelevant to sequence-number
+        // assignment, which is the behavior under test here.
+        val orchestrator = FakeSequenceCapturingSigningOrchestrator(fakeTripRepository)
 
         orchestrator.signAndFinalizeTrip("trip-work-pending")
 
         assertEquals(
             "PENDING_BUSINESS_REASON trip must receive sequence 2, not 3 (no self-count)",
             2,
-            capturedSequenceNumber,
+            orchestrator.capturedSequenceNumbers.last(),
         )
     }
 
@@ -302,33 +277,7 @@ class TripSigningOrchestratorSelfHealTest {
     @Test
     fun `two consecutive trip finalizations receive strictly increasing sequence numbers`() = runTest {
         val fakeTripRepository = FakeTripRepository()
-        val fakeSettingsRepository = FakeSettingsRepository()
-
-        val assignedSequenceNumbers = mutableListOf<Int>()
-
-        val orchestrator = object : TripSigningOrchestrator(
-            tripRepository = fakeTripRepository,
-            settingsRepository = fakeSettingsRepository,
-            tripSigner = TripSigner(),
-        ) {
-            override suspend fun signAndFinalizeTrip(tripId: String) {
-                val sequenceNumber = fakeTripRepository.countAssignedSequenceNumbers(
-                    excludeTripId = tripId,
-                ) + 1
-                assignedSequenceNumbers.add(sequenceNumber)
-                fakeTripRepository.updateSigningFields(
-                    tripId = tripId,
-                    signatureBase64 = "sig-$sequenceNumber",
-                    signingKeyId = "key",
-                    tripSequenceNumber = sequenceNumber,
-                )
-                fakeTripRepository.markTripCompleted(
-                    tripId = tripId,
-                    signatureBase64 = "sig-$sequenceNumber",
-                    signingKeyId = "key",
-                )
-            }
-        }
+        val orchestrator = FakeSequenceCapturingSigningOrchestrator(fakeTripRepository)
 
         // Finalize first trip.
         val firstTrip = buildSignedTrip(
@@ -348,6 +297,7 @@ class TripSigningOrchestratorSelfHealTest {
         fakeTripRepository.setInProgressTrip(secondTrip)
         orchestrator.signAndFinalizeTrip("trip-second")
 
+        val assignedSequenceNumbers = orchestrator.capturedSequenceNumbers
         assertEquals("Two trips should have been finalized", 2, assignedSequenceNumbers.size)
         assertEquals("First trip sequence must be 1", 1, assignedSequenceNumbers[0])
         assertEquals("Second trip sequence must be 2", 2, assignedSequenceNumbers[1])
@@ -355,5 +305,44 @@ class TripSigningOrchestratorSelfHealTest {
             "Sequence numbers must be strictly increasing",
             assignedSequenceNumbers[1] > assignedSequenceNumbers[0],
         )
+    }
+}
+
+/**
+ * Hand-written fake [TripSigningOrchestrator] used by sequence-number regression tests
+ * (T-034 / T-039 item 7). Captures every assigned sequence number instead of calling the real
+ * Android Keystore (unavailable in JVM tests), and simulates a successful sign by writing stub
+ * signing fields directly to the supplied [FakeTripRepository].
+ *
+ * Replaces the previous pattern of subclassing the (formerly `open`) orchestrator class and
+ * overriding [signAndFinalizeTrip] per test — this fake implements the public interface only,
+ * consistent with the project's "fakes over mocks" convention (see [FakeTripRepository]).
+ */
+private class FakeSequenceCapturingSigningOrchestrator(
+    private val fakeTripRepository: FakeTripRepository,
+) : TripSigningOrchestrator {
+
+    val capturedSequenceNumbers = mutableListOf<Int>()
+
+    override suspend fun signAndFinalizeTrip(tripId: String) {
+        val sequenceNumber = fakeTripRepository.countAssignedSequenceNumbers(
+            excludeTripId = tripId,
+        ) + 1
+        capturedSequenceNumbers.add(sequenceNumber)
+        fakeTripRepository.updateSigningFields(
+            tripId = tripId,
+            signatureBase64 = "stub-sig-$sequenceNumber",
+            signingKeyId = "stub-key",
+            tripSequenceNumber = sequenceNumber,
+        )
+        fakeTripRepository.markTripCompleted(
+            tripId = tripId,
+            signatureBase64 = "stub-sig-$sequenceNumber",
+            signingKeyId = "stub-key",
+        )
+    }
+
+    override suspend fun rebuildChainTailFromRoom() {
+        // Not exercised by these tests — no-op.
     }
 }

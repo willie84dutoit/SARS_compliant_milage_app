@@ -13,7 +13,17 @@ import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import javax.inject.Qualifier
 import javax.inject.Singleton
+
+/**
+ * Qualifier for the [CoroutineScope] that backs the 30-second confidence-acquisition timer
+ * (blueprint §4 point 4). CPU-bound, no I/O, so runs on [Dispatchers.Default]; [SupervisorJob]
+ * ensures a failure in one window's timer does not take down future windows.
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class ConfidenceAcquisitionScope
 
 /**
  * T-002.3/T-002.4 bindings for the ActivityRecognition detection pipeline.
@@ -60,11 +70,12 @@ abstract class ActivityRecognitionModule {
         /**
          * Backs [ConfidenceAcquisitionWindowImpl]'s 30s timer (blueprint §4 point 4). CPU-bound,
          * no I/O, so `Dispatchers.Default`; `SupervisorJob()` so a failure in one window's timer
-         * doesn't take down future windows. App-scoped, not service-scoped — see the class doc
+         * doesn't take down future windows. Singleton-scoped, not service-scoped — see the class doc
          * above for why this binding lives in `SingletonComponent`.
          */
         @Provides
         @Singleton
+        @ConfidenceAcquisitionScope
         fun provideConfidenceAcquisitionCoroutineScope(): CoroutineScope {
             return CoroutineScope(SupervisorJob() + Dispatchers.Default)
         }

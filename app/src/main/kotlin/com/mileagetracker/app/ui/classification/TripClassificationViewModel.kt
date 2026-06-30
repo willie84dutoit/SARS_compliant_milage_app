@@ -296,6 +296,11 @@ class TripClassificationViewModel @Inject constructor(
      *
      * Empty reading → skip (b), trip saves with verifiedOdometerKm = null (brief §5.3).
      * A thrown exception sets [saveError] — never swallowed.
+     *
+     * Steps (a) and (b) return [TripWriteResult] — every variant is branched on explicitly via an
+     * exhaustive `when` (no `else`), so a future variant fails to compile until handled here too.
+     * [TripWriteResult.RejectedSignedRow] and [TripWriteResult.TripNotFound] both abort the save
+     * and surface [saveError]; neither is swallowed.
      */
     fun onSaveClassification(onSaved: () -> Unit) {
         val currentState = _uiState.value
@@ -359,16 +364,30 @@ class TripClassificationViewModel @Inject constructor(
                     businessReasonToStore,
                 )
                 val classificationWriteResult = tripRepository.updateClassification(tripId, classification, businessReasonToStore)
-                if (classificationWriteResult == TripWriteResult.RejectedSignedRow) {
-                    Timber.tag(CLASSIFICATION_TRIP_LOG_TAG).w(
-                        "TripClassificationScreen: classification write rejected — trip already signed tripId=%s",
-                        tripId,
-                    )
-                    _uiState.value = _uiState.value.copy(
-                        isSaving = false,
-                        saveError = "This trip is finalized and can't be edited",
-                    )
-                    return@launch
+                when (classificationWriteResult) {
+                    TripWriteResult.Success -> Unit
+                    TripWriteResult.RejectedSignedRow -> {
+                        Timber.tag(CLASSIFICATION_TRIP_LOG_TAG).w(
+                            "TripClassificationScreen: classification write rejected — trip already signed tripId=%s",
+                            tripId,
+                        )
+                        _uiState.value = _uiState.value.copy(
+                            isSaving = false,
+                            saveError = "This trip is finalized and can't be edited",
+                        )
+                        return@launch
+                    }
+                    TripWriteResult.TripNotFound -> {
+                        Timber.tag(CLASSIFICATION_TRIP_LOG_TAG).e(
+                            "TripClassificationScreen: classification write failed — trip not found tripId=%s",
+                            tripId,
+                        )
+                        _uiState.value = _uiState.value.copy(
+                            isSaving = false,
+                            saveError = "Save failed — please try again",
+                        )
+                        return@launch
+                    }
                 }
 
                 if (verifiedOdometerKmOrNull != null) {
@@ -378,16 +397,30 @@ class TripClassificationViewModel @Inject constructor(
                         tripId,
                     )
                     val odometerWriteResult = tripRepository.updateVerifiedOdometer(tripId, verifiedOdometerKmOrNull)
-                    if (odometerWriteResult == TripWriteResult.RejectedSignedRow) {
-                        Timber.tag(CLASSIFICATION_TRIP_LOG_TAG).w(
-                            "TripClassificationScreen: odometer write rejected — trip already signed tripId=%s",
-                            tripId,
-                        )
-                        _uiState.value = _uiState.value.copy(
-                            isSaving = false,
-                            saveError = "This trip is finalized and can't be edited",
-                        )
-                        return@launch
+                    when (odometerWriteResult) {
+                        TripWriteResult.Success -> Unit
+                        TripWriteResult.RejectedSignedRow -> {
+                            Timber.tag(CLASSIFICATION_TRIP_LOG_TAG).w(
+                                "TripClassificationScreen: odometer write rejected — trip already signed tripId=%s",
+                                tripId,
+                            )
+                            _uiState.value = _uiState.value.copy(
+                                isSaving = false,
+                                saveError = "This trip is finalized and can't be edited",
+                            )
+                            return@launch
+                        }
+                        TripWriteResult.TripNotFound -> {
+                            Timber.tag(CLASSIFICATION_TRIP_LOG_TAG).e(
+                                "TripClassificationScreen: odometer write failed — trip not found tripId=%s",
+                                tripId,
+                            )
+                            _uiState.value = _uiState.value.copy(
+                                isSaving = false,
+                                saveError = "Save failed — please try again",
+                            )
+                            return@launch
+                        }
                     }
                 } else {
                     Timber.tag(CLASSIFICATION_TRIP_LOG_TAG).i(

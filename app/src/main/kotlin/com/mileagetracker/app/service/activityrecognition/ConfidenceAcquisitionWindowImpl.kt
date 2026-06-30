@@ -1,6 +1,7 @@
 package com.mileagetracker.app.service.activityrecognition
 
 import com.mileagetracker.app.domain.statemachine.TripStartEvent
+import com.mileagetracker.app.service.di.ConfidenceAcquisitionScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -30,7 +31,7 @@ internal const val START_CONFIDENCE_THRESHOLD_PERCENT = 70
  */
 class ConfidenceAcquisitionWindowImpl @Inject constructor(
     private val activityUpdatesRegistrar: ActivityUpdatesRegistrar,
-    private val coroutineScope: CoroutineScope,
+    @ConfidenceAcquisitionScope private val coroutineScope: CoroutineScope,
     private val bluetoothDiagnosticsSnapshot: BluetoothDiagnosticsSnapshot,
 ) : ConfidenceAcquisitionWindow, VehicleEntryConfidenceGateway {
 

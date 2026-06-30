@@ -6,6 +6,7 @@ import com.mileagetracker.app.domain.model.TripStatus
 import com.mileagetracker.app.domain.repository.TripWriteResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 
 /**
  * Hand-written fake (no mocking framework, per this project's testing convention) for
@@ -43,7 +44,9 @@ class FakeTripRepository : TripRepository {
     }
 
     override fun observePendingBusinessReasonTrips(): Flow<List<Trip>> {
-        return MutableStateFlow(tripHistoryState.value.filter { it.status == TripStatus.PENDING_BUSINESS_REASON })
+        return tripHistoryState.map { trips ->
+            trips.filter { it.status == TripStatus.PENDING_BUSINESS_REASON }
+        }
     }
 
     override suspend fun insertNewActiveTrip(trip: Trip) {

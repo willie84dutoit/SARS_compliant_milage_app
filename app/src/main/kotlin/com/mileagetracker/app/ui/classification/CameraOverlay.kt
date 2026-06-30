@@ -21,7 +21,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,13 +61,17 @@ fun InlineCameraOverlay(
     onCaptureOrDecodeError: (String) -> Unit,
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
+    // T-041 Item 3: read via rememberUpdatedState so AndroidView.factory's bindToLifecycle
+    // call (invoked later, possibly after this composable has recomposed with a new
+    // LifecycleOwner) always binds against the CURRENT owner rather than the one captured
+    // at the time factory{} was created.
+    val currentLifecycleOwner = rememberUpdatedState(LocalLifecycleOwner.current)
 
     val imageCaptureUseCase = remember { ImageCapture.Builder().build() }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     val boundCameraProviderHolder = remember { BoundCameraProviderHolder() }
 
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(currentLifecycleOwner.value) {
         onDispose {
             boundCameraProviderHolder.provider?.unbindAll()
             cameraExecutor.shutdown()
@@ -76,41 +82,60 @@ fun InlineCameraOverlay(
         File(context.filesDir, OCR_TEMP_DIRECTORY_NAME).also { it.mkdirs() }
     }
 
+    // T-041 Item 2: caller-supplied callbacks are captured via rememberUpdatedState so the
+    // stable lambdas below (remembered once per overlay lifetime) always invoke the latest
+    // version without the lambdas themselves needing to be re-created on every recomposition.
+    val currentOnBitmapReady = rememberUpdatedState(onBitmapReady)
+    val currentOnCaptureOrDecodeError = rememberUpdatedState(onCaptureOrDecodeError)
+    val currentOnDismiss = rememberUpdatedState(onDismiss)
+
+    val stableOnCaptureError = remember {
+        { captureException: ImageCaptureException ->
+            // T-031 N-3: log and propagate so the ViewModel can close the overlay
+            // and show the user visible error feedback.
+            Timber.tag(CLASSIFICATION_SCREEN_LOG_TAG).e(
+                captureException,
+                "InlineCameraOverlay: ImageCapture/decode failed for tripId=%s",
+                tripId,
+            )
+            currentOnCaptureOrDecodeError.value(
+                captureException.message ?: "Camera capture failed",
+            )
+        }
+    }
+
+    val stableOnBitmapReady = remember {
+        { bitmap: Bitmap, uri: String -> currentOnBitmapReady.value(bitmap, uri) }
+    }
+
+    val stableOnDismissClick = remember {
+        {
+            Timber.tag(CLASSIFICATION_SCREEN_LOG_TAG).i(
+                "InlineCameraOverlay: Cancel tapped tripId=%s",
+                tripId,
+            )
+            currentOnDismiss.value()
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black),
     ) {
         CameraPreviewWithCapture(
-            lifecycleOwner = lifecycleOwner,
+            lifecycleOwner = currentLifecycleOwner,
             imageCaptureUseCase = imageCaptureUseCase,
             cameraExecutor = cameraExecutor,
             ocrTempDirectory = ocrTempDirectory,
             boundCameraProviderHolder = boundCameraProviderHolder,
-            onBitmapReady = onBitmapReady,
-            onCaptureError = { captureException ->
-                // T-031 N-3: log and propagate so the ViewModel can close the overlay
-                // and show the user visible error feedback.
-                Timber.tag(CLASSIFICATION_SCREEN_LOG_TAG).e(
-                    captureException,
-                    "InlineCameraOverlay: ImageCapture/decode failed for tripId=%s",
-                    tripId,
-                )
-                onCaptureOrDecodeError(
-                    captureException.message ?: "Camera capture failed",
-                )
-            },
+            onBitmapReady = stableOnBitmapReady,
+            onCaptureError = stableOnCaptureError,
         )
 
         // Dismiss button top-right.
         IconButton(
-            onClick = {
-                Timber.tag(CLASSIFICATION_SCREEN_LOG_TAG).i(
-                    "InlineCameraOverlay: Cancel tapped tripId=%s",
-                    tripId,
-                )
-                onDismiss()
-            },
+            onClick = stableOnDismissClick,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(8.dp),
@@ -134,7 +159,7 @@ private class BoundCameraProviderHolder {
 
 @Composable
 private fun CameraPreviewWithCapture(
-    lifecycleOwner: LifecycleOwner,
+    lifecycleOwner: State<LifecycleOwner>,
     imageCaptureUseCase: ImageCapture,
     cameraExecutor: java.util.concurrent.ExecutorService,
     ocrTempDirectory: File,
@@ -158,7 +183,11 @@ private fun CameraPreviewWithCapture(
                             try {
                                 cameraProvider.unbindAll()
                                 cameraProvider.bindToLifecycle(
-                                    lifecycleOwner,
+                                    // T-041 Item 3: read .value at bind time (the listener
+                                    // callback fires asynchronously after getInstance()
+                                    // resolves) so the CURRENT lifecycle owner is always
+                                    // used, not one captured when factory{} first ran.
+                                    lifecycleOwner.value,
                                     CameraSelector.DEFAULT_BACK_CAMERA,
                                     previewUseCase,
                                     imageCaptureUseCase,
@@ -177,8 +206,14 @@ private fun CameraPreviewWithCapture(
             modifier = Modifier.fillMaxSize(),
         )
 
-        Button(
-            onClick = {
+        // T-041 Item 2: onClick + OnImageSavedCallback are wrapped in remember so they are
+        // not re-allocated every recomposition. Safe because every value they close over
+        // (ocrTempDirectory, imageCaptureUseCase, cameraExecutor, boundCameraProviderHolder,
+        // onBitmapReady, onCaptureError) is itself remembered once for the overlay's
+        // lifetime by the caller (InlineCameraOverlay) — none of them change identity
+        // across recompositions, so capturing them here is safe and never goes stale.
+        val stableCaptureOnClick = remember {
+            {
                 Timber.tag(CLASSIFICATION_SCREEN_LOG_TAG).i("CameraPreviewWithCapture: Capture tapped")
                 val outputFile = File(ocrTempDirectory, "odometer_${System.currentTimeMillis()}.jpg")
                 val outputOptions = ImageCapture.OutputFileOptions.Builder(outputFile).build()
@@ -267,7 +302,11 @@ private fun CameraPreviewWithCapture(
                         }
                     },
                 )
-            },
+            }
+        }
+
+        Button(
+            onClick = stableCaptureOnClick,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 32.dp),
