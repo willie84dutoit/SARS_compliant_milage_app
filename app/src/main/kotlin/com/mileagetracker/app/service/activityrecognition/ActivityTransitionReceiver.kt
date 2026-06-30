@@ -41,10 +41,6 @@ class ActivityTransitionReceiver : BroadcastReceiver() {
                 ActivityTransition.ACTIVITY_TRANSITION_ENTER -> {
                     Timber.tag("MT-ActivityRecognition")
                         .i("IN_VEHICLE ENTER received at %d", event.elapsedRealTimeNanos)
-                    // TODO(T-002.4): once ConfidenceAcquisitionWindowImpl exists, this call site
-                    // is what triggers its 30s confidence-acquisition window. For now this is a
-                    // no-op (see NoOpVehicleEntryConfidenceGateway) — no trip lifecycle progress
-                    // happens from this event yet.
                     confidenceEntryGateway.onVehicleEntryDetected(enteredAtEpochMillis = System.currentTimeMillis())
                 }
 

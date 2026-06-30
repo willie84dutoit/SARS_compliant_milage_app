@@ -46,10 +46,14 @@ fun SettingsScreen(
             }
 
             Row {
-                Text("Bluetooth vehicle trigger (advanced)")
+                Column {
+                    Text("Bluetooth vehicle trigger (advanced)")
+                    Text("Coming soon", modifier = Modifier.padding(top = 4.dp))
+                }
                 Switch(
                     checked = uiState.isBluetoothVehicleTriggerEnabled,
-                    onCheckedChange = viewModel::onBluetoothVehicleTriggerToggled,
+                    enabled = false,
+                    onCheckedChange = {},
                 )
             }
 

@@ -73,9 +73,14 @@ import javax.inject.Inject
  * detection pipeline above never gets a chance to fire. `requestedAction == null` falls through the
  * `when (requestedAction)` below as a deliberate no-op: the recovery check still runs (safe — it
  * only re-attaches to an already-ACTIVE trip) and `register()` still re-runs (safe — re-registering
- * the same PendingIntent is idempotent per [ActivityRecognitionRegistrar]'s own class doc). This is
- * intentionally scoped to "app opened" only for this chunk; a boot-completed receiver and an
- * always-on/sleeping-wake-on-detection redesign are explicitly deferred, not built here.
+ * the same PendingIntent is idempotent per [ActivityRecognitionRegistrar]'s own class doc).
+ *
+ * T-035: [com.mileagetracker.app.service.BootCompletedReceiver] is a second caller of this same
+ * no-action start — after a device reboot it performs the identical
+ * `Intent(context, TripTrackingForegroundService::class.java)` / `startForegroundService()` call
+ * MainActivity makes on every app launch, so `onStartCommand` re-arms detection without the user
+ * needing to reopen the app first. An always-on/sleeping-wake-on-detection redesign beyond that is
+ * still deferred, not built here.
  */
 @AndroidEntryPoint
 class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
@@ -244,37 +249,37 @@ class TripTrackingForegroundService : Service(), TripLocationCallback.Listener {
         return START_STICKY
     }
 
+    /**
+     * Safely executes a teardown block, catching and logging any exception without propagating it.
+     * Used in [onDestroy] to ensure all cleanup steps complete even if one fails.
+     */
+    private inline fun safeTeardown(label: String, block: () -> Unit) {
+        runCatching {
+            block()
+        }.onFailure { teardownException ->
+            Timber.tag("MT-Service").e(teardownException, "onDestroy step failed: %s", label)
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        runCatching {
+        safeTeardown("removeLocationUpdates") {
             fusedLocationProviderClient.removeLocationUpdates(tripLocationCallback)
-        }.onFailure { removeLocationUpdatesException ->
-            Timber.tag("MT-Service").e(removeLocationUpdatesException, "onDestroy step failed: removeLocationUpdates")
         }
-        runCatching {
+        safeTeardown("activityRecognitionRegistrar.unregister") {
             activityRecognitionRegistrar.unregister()
-        }.onFailure { unregisterException ->
-            Timber.tag("MT-Service").e(unregisterException, "onDestroy step failed: activityRecognitionRegistrar.unregister")
         }
-        runCatching {
+        safeTeardown("confidenceAcquisitionWindow.cancel") {
             confidenceAcquisitionWindow.cancel()
-        }.onFailure { confidenceWindowCancelException ->
-            Timber.tag("MT-Service").e(confidenceWindowCancelException, "onDestroy step failed: confidenceAcquisitionWindow.cancel")
         }
-        runCatching {
+        safeTeardown("inactivityTimerJob.cancel") {
             inactivityTimerJob?.cancel()
-        }.onFailure { inactivityCancelException ->
-            Timber.tag("MT-Service").e(inactivityCancelException, "onDestroy step failed: inactivityTimerJob.cancel")
         }
-        runCatching {
+        safeTeardown("unstableSignalTimerJob.cancel") {
             unstableSignalTimerJob?.cancel()
-        }.onFailure { unstableCancelException ->
-            Timber.tag("MT-Service").e(unstableCancelException, "onDestroy step failed: unstableSignalTimerJob.cancel")
         }
-        runCatching {
+        safeTeardown("serviceJob.cancel") {
             serviceJob.cancel()
-        }.onFailure { serviceJobCancelException ->
-            Timber.tag("MT-Service").e(serviceJobCancelException, "onDestroy step failed: serviceJob.cancel")
         }
     }
 

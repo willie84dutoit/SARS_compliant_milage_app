@@ -75,6 +75,20 @@
             android:name=".service.activityrecognition.ConfidenceUpdateReceiver"
             android:exported="false" />
 
+        <!-- T-035: re-arms automatic detection after a device reboot (see
+             BootCompletedReceiver class doc for what it does and how it degrades when
+             ACCESS_FINE_LOCATION is absent). exported="true" is required for the system to
+             deliver the implicit BOOT_COMPLETED broadcast to this receiver; RECEIVE_BOOT_COMPLETED
+             (declared above) plus the action-string check in onReceive prevent any other app from
+             triggering it usefully. -->
+        <receiver
+            android:name=".service.BootCompletedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

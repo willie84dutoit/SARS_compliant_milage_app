@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -78,7 +79,7 @@ class ExportViewModel @Inject constructor(
     fun onExportRequested() {
         Timber.tag("MT-UI").i("ExportScreen: Export button clicked")
         viewModelScope.launch {
-            exportProgressAndResult.value = exportProgressAndResult.value.copy(isExportInProgress = true)
+            exportProgressAndResult.update { it.copy(isExportInProgress = true) }
             val completedTrips = tripRepository.getCompletedTripsForExport()
             val exportRows = CsvExportRules.buildExportRows(completedTrips)
             val writeResult = withContext(Dispatchers.IO) {
@@ -94,10 +95,9 @@ class ExportViewModel @Inject constructor(
                 )
                 is ExportWriteResult.Failure -> ExportResult.Failure(writeResult.message)
             }
-            exportProgressAndResult.value = ExportUiState(
-                isExportInProgress = false,
-                lastExportResult = exportResult,
-            )
+            exportProgressAndResult.update {
+                it.copy(isExportInProgress = false, lastExportResult = exportResult)
+            }
         }
     }
 }

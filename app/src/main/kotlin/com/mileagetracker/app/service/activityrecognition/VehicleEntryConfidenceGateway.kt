@@ -30,17 +30,3 @@ interface VehicleEntryConfidenceGateway {
     fun onVehicleEntryDetected(enteredAtEpochMillis: Long)
 }
 
-/**
- * T-002.4 placeholder binding (see [VehicleEntryConfidenceGateway] doc). Intentionally does
- * nothing — no confidence window exists yet, so there is nothing to start. Replace this binding
- * in `ActivityRecognitionModule` once `ConfidenceAcquisitionWindowImpl` exists; do not delete this
- * class without confirming no test or build config still references it.
- */
-class NoOpVehicleEntryConfidenceGateway @Inject constructor() : VehicleEntryConfidenceGateway {
-    override fun onVehicleEntryDetected(enteredAtEpochMillis: Long) {
-        // TODO(T-002.4): replace this binding with ConfidenceAcquisitionWindowImpl once the
-        // confidence-acquisition window (5s-interval subscription, 30s timer, running-maximum
-        // tracking) is implemented. Until then, an ENTER transition is observed and logged
-        // (see ActivityTransitionReceiver) but does not yet progress the trip lifecycle.
-    }
-}
