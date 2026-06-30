@@ -2,7 +2,7 @@ package com.mileagetracker.app.ui.export
 
 import app.cash.turbine.test
 import com.mileagetracker.app.data.export.CsvWriter
-import com.mileagetracker.app.data.export.CsvWriteResult
+import com.mileagetracker.app.data.export.ExportWriteResult
 import com.mileagetracker.app.domain.export.CsvRow
 import com.mileagetracker.app.domain.model.PhotoRetentionMode
 import com.mileagetracker.app.domain.model.Trip
@@ -86,16 +86,33 @@ class ExportViewModelTest {
     // ------------------------------------------------------------------
 
     private class FakeCsvWriter(
-        private val resultToReturn: CsvWriteResult,
+        private val resultToReturn: ExportWriteResult,
     ) : CsvWriter {
         var lastRowCountReceived: Int = -1
             private set
+        var lastTripCountReceived: Int = -1
+            private set
 
-        override fun writeToDownloads(rows: List<CsvRow>): CsvWriteResult {
+        override fun writeExport(trips: List<Trip>, rows: List<CsvRow>): ExportWriteResult {
+            lastTripCountReceived = trips.size
             lastRowCountReceived = rows.size
             return resultToReturn
         }
     }
+
+    // ------------------------------------------------------------------
+    // Default success result helper (T-032 Half A / Pass 2 fields default to "sidecar written")
+    // ------------------------------------------------------------------
+
+    private fun buildDefaultSuccessResult(
+        csvFilename: String = "mileage_trips_20240101_120000.csv",
+    ) = ExportWriteResult.Success(
+        csvFilename = csvFilename,
+        sidecarWritten = true,
+        sidecarJsonFilename = "mileage_trips_20240101_120000.integrity.json",
+        verifyMarkdownFilename = "VERIFY.md",
+        integrityWarning = null,
+    )
 
     // ------------------------------------------------------------------
     // ViewModel builder helper
@@ -103,9 +120,7 @@ class ExportViewModelTest {
 
     private fun buildViewModel(
         fakeTripRepository: FakeTripRepository = FakeTripRepository(),
-        fakeCsvWriter: FakeCsvWriter = FakeCsvWriter(
-            CsvWriteResult.Success("mileage_trips_20240101_120000.csv"),
-        ),
+        fakeCsvWriter: FakeCsvWriter = FakeCsvWriter(buildDefaultSuccessResult()),
     ): ExportViewModel = ExportViewModel(
         tripRepository = fakeTripRepository,
         csvWriter = fakeCsvWriter,
@@ -125,9 +140,7 @@ class ExportViewModelTest {
                     buildTrip(id = "trip-2"),
                 ),
             )
-            val fakeCsvWriter = FakeCsvWriter(
-                CsvWriteResult.Success("mileage_trips_20240101_120000.csv"),
-            )
+            val fakeCsvWriter = FakeCsvWriter(buildDefaultSuccessResult())
             val viewModel = buildViewModel(fakeTripRepository, fakeCsvWriter)
 
             viewModel.uiState.test {
@@ -173,7 +186,7 @@ class ExportViewModelTest {
     fun `onExportRequested with write failure returns Failure with error message`() = runTest {
         val fakeTripRepository = FakeTripRepository()
         fakeTripRepository.setTripHistory(listOf(buildTrip(id = "trip-1")))
-        val fakeCsvWriter = FakeCsvWriter(CsvWriteResult.Failure("Storage full"))
+        val fakeCsvWriter = FakeCsvWriter(ExportWriteResult.Failure("Storage full"))
         val viewModel = buildViewModel(fakeTripRepository, fakeCsvWriter)
 
         viewModel.uiState.test {
@@ -204,9 +217,7 @@ class ExportViewModelTest {
     fun `onExportRequested sets isExportInProgress true then false around the async work`() = runTest {
         val fakeTripRepository = FakeTripRepository()
         fakeTripRepository.setTripHistory(listOf(buildTrip(id = "trip-1")))
-        val fakeCsvWriter = FakeCsvWriter(
-            CsvWriteResult.Success("mileage_trips_20240101_120000.csv"),
-        )
+        val fakeCsvWriter = FakeCsvWriter(buildDefaultSuccessResult())
         val viewModel = buildViewModel(fakeTripRepository, fakeCsvWriter)
 
         viewModel.uiState.test {
@@ -241,6 +252,140 @@ class ExportViewModelTest {
                 "completedTripCount should be 0 when no trips in repository",
                 0,
                 settledState.completedTripCount,
+            )
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Test 5 (T-032 Half A / Pass 2): ViewModel passes the full Trip list through to the
+    // writer (not just the CSV rows) — the sidecar generator needs the Trip objects for the
+    // signing fields, which CsvRow does not carry.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `onExportRequested passes the full completed trip list through to csvWriter alongside the rows`() = runTest {
+        val fakeTripRepository = FakeTripRepository()
+        fakeTripRepository.setTripHistory(
+            listOf(buildTrip(id = "trip-1"), buildTrip(id = "trip-2"), buildTrip(id = "trip-3")),
+        )
+        val fakeCsvWriter = FakeCsvWriter(buildDefaultSuccessResult())
+        val viewModel = buildViewModel(fakeTripRepository, fakeCsvWriter)
+
+        viewModel.uiState.test {
+            advanceUntilIdle()
+            expectMostRecentItem()
+
+            viewModel.onExportRequested()
+            awaitItem() // isExportInProgress = true
+            advanceUntilIdle()
+            awaitItem() // settled result
+
+            assertEquals(
+                "csvWriter.writeExport must receive all 3 completed trips, not just rows",
+                3,
+                fakeCsvWriter.lastTripCountReceived,
+            )
+            assertEquals(
+                "csvWriter.writeExport must receive the matching row count",
+                3,
+                fakeCsvWriter.lastRowCountReceived,
+            )
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Test 6 (T-032 Half A / Pass 2): success + sidecar filenames surface on ExportResult.Success
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `onExportRequested surfaces sidecar and verify filenames on success when sidecar was written`() = runTest {
+        val fakeTripRepository = FakeTripRepository()
+        fakeTripRepository.setTripHistory(listOf(buildTrip(id = "trip-1")))
+        val fakeCsvWriter = FakeCsvWriter(
+            ExportWriteResult.Success(
+                csvFilename = "mileage_trips_20260630_142205.csv",
+                sidecarWritten = true,
+                sidecarJsonFilename = "mileage_trips_20260630_142205.integrity.json",
+                verifyMarkdownFilename = "VERIFY.md",
+                integrityWarning = null,
+            ),
+        )
+        val viewModel = buildViewModel(fakeTripRepository, fakeCsvWriter)
+
+        viewModel.uiState.test {
+            advanceUntilIdle()
+            expectMostRecentItem()
+
+            viewModel.onExportRequested()
+            awaitItem()
+            advanceUntilIdle()
+
+            val resultState = awaitItem()
+            val successResult = resultState.lastExportResult as ExportResult.Success
+            assertEquals(
+                "sidecarJsonFilename should be surfaced",
+                "mileage_trips_20260630_142205.integrity.json",
+                successResult.sidecarJsonFilename,
+            )
+            assertEquals(
+                "verifyMarkdownFilename should be surfaced",
+                "VERIFY.md",
+                successResult.verifyMarkdownFilename,
+            )
+            assertEquals(
+                "integrityWarning should be null when the sidecar was written successfully",
+                null,
+                successResult.integrityWarning,
+            )
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Test 7 (T-032 Half A / Pass 2): fallback-with-warning — CSV still exported, sidecar wasn't,
+    // and the loud warning message is surfaced on the success result rather than blocking export.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `onExportRequested surfaces integrityWarning and null sidecar filenames on key-read fallback`() = runTest {
+        val fakeTripRepository = FakeTripRepository()
+        fakeTripRepository.setTripHistory(listOf(buildTrip(id = "trip-1")))
+        val fakeCsvWriter = FakeCsvWriter(
+            ExportWriteResult.Success(
+                csvFilename = "mileage_trips_20260630_142205.csv",
+                sidecarWritten = false,
+                sidecarJsonFilename = null,
+                verifyMarkdownFilename = null,
+                integrityWarning = "Integrity file could not be generated — these records are " +
+                    "not cryptographically verifiable.",
+            ),
+        )
+        val viewModel = buildViewModel(fakeTripRepository, fakeCsvWriter)
+
+        viewModel.uiState.test {
+            advanceUntilIdle()
+            expectMostRecentItem()
+
+            viewModel.onExportRequested()
+            awaitItem()
+            advanceUntilIdle()
+
+            val resultState = awaitItem()
+            assertTrue(
+                "export must still report Success even when the sidecar fell back",
+                resultState.lastExportResult is ExportResult.Success,
+            )
+            val successResult = resultState.lastExportResult as ExportResult.Success
+            assertEquals(
+                "csv filename must still be reported on the fallback path",
+                "mileage_trips_20260630_142205.csv",
+                successResult.filename,
+            )
+            assertEquals(null, successResult.sidecarJsonFilename)
+            assertEquals(null, successResult.verifyMarkdownFilename)
+            assertEquals(
+                "integrityWarning must be the loud user-facing fallback message",
+                "Integrity file could not be generated — these records are not cryptographically verifiable.",
+                successResult.integrityWarning,
             )
         }
     }

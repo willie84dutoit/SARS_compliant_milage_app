@@ -3,7 +3,7 @@ package com.mileagetracker.app.ui.export
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mileagetracker.app.data.export.CsvWriter
-import com.mileagetracker.app.data.export.CsvWriteResult
+import com.mileagetracker.app.data.export.ExportWriteResult
 import com.mileagetracker.app.domain.export.CsvExportRules
 import com.mileagetracker.app.domain.repository.TripRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,10 +27,20 @@ import javax.inject.Inject
  * M-3 fix: [ExportUiState.completedTripCount] is populated reactively from
  * [TripRepository.observeTripHistory] so the screen can disable the Export button and show a
  * meaningful empty-state message when there are no completed trips to export.
+ *
+ * T-032 Half A / Pass 2: [Success] now also reports the integrity sidecar filenames (when
+ * written) and [Success.integrityWarning] (the fallback-with-warning path — CSV exported fine,
+ * but no sidecar could be generated because the signing public key was unreadable).
  */
 sealed interface ExportResult {
     data object Idle : ExportResult
-    data class Success(val filename: String, val rowCount: Int) : ExportResult
+    data class Success(
+        val filename: String,
+        val rowCount: Int,
+        val sidecarJsonFilename: String? = null,
+        val verifyMarkdownFilename: String? = null,
+        val integrityWarning: String? = null,
+    ) : ExportResult
     data class Failure(val message: String) : ExportResult
 }
 
@@ -72,11 +82,17 @@ class ExportViewModel @Inject constructor(
             val completedTrips = tripRepository.getCompletedTripsForExport()
             val exportRows = CsvExportRules.buildExportRows(completedTrips)
             val writeResult = withContext(Dispatchers.IO) {
-                csvWriter.writeToDownloads(exportRows)
+                csvWriter.writeExport(completedTrips, exportRows)
             }
             val exportResult = when (writeResult) {
-                is CsvWriteResult.Success -> ExportResult.Success(writeResult.filename, exportRows.size)
-                is CsvWriteResult.Failure -> ExportResult.Failure(writeResult.message)
+                is ExportWriteResult.Success -> ExportResult.Success(
+                    filename = writeResult.csvFilename,
+                    rowCount = exportRows.size,
+                    sidecarJsonFilename = writeResult.sidecarJsonFilename,
+                    verifyMarkdownFilename = writeResult.verifyMarkdownFilename,
+                    integrityWarning = writeResult.integrityWarning,
+                )
+                is ExportWriteResult.Failure -> ExportResult.Failure(writeResult.message)
             }
             exportProgressAndResult.value = ExportUiState(
                 isExportInProgress = false,

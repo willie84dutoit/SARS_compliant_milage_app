@@ -16,6 +16,9 @@ import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** Line width for [TripSigner.getSigningPublicKeyPem]'s PEM body wrapping (RFC 7468 convention). */
+private const val PEM_LINE_WIDTH = 64
+
 /**
  * T-008: generates an ECDSA P-256 signing key in the Android Keystore (StrongBox preferred,
  * TEE fallback) and signs the canonical per-trip payload defined in the T-008 DECISION log entry
@@ -164,6 +167,40 @@ class TripSigner @Inject constructor() {
     }
 
     /**
+     * T-032 Half A / Pass 2: returns the CURRENT signing key's public key as a PEM-wrapped
+     * SubjectPublicKeyInfo block (`-----BEGIN PUBLIC KEY-----` / `-----END PUBLIC KEY-----`,
+     * 64-char body lines), for embedding in the integrity sidecar's `publicKeyPem` field.
+     *
+     * Reads ONLY [java.security.cert.Certificate.getPublicKey] from the Keystore entry — the
+     * private key is never touched, never exported, and this method has no way to access it
+     * (Android Keystore private keys are not extractable in the first place). Returns null if the
+     * alias does not exist yet or any Keystore read fails; never throws, mirroring [signTrip]'s
+     * never-block contract — the caller (export flow) must degrade to the fallback-with-warning
+     * path rather than blocking the CSV export.
+     */
+    fun getSigningPublicKeyPem(): String? {
+        return try {
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE_PROVIDER).apply { load(null) }
+            val certificate = keyStore.getCertificate(KEYSTORE_ALIAS) ?: return null
+            val publicKey = certificate.publicKey
+            val base64Body = Base64.getEncoder().encodeToString(publicKey.encoded)
+            buildString {
+                append("-----BEGIN PUBLIC KEY-----\n")
+                base64Body.chunked(PEM_LINE_WIDTH).forEach { line -> append(line).append('\n') }
+                append("-----END PUBLIC KEY-----\n")
+            }
+        } catch (keystoreReadFailure: Exception) {
+            Timber.tag(TIMBER_TAG).e(
+                keystoreReadFailure,
+                "getSigningPublicKeyPem: FAILED to read public key for alias=%s — integrity " +
+                    "sidecar generation will fall back to CSV-only with a warning",
+                KEYSTORE_ALIAS,
+            )
+            null
+        }
+    }
+
+    /**
      * Builds the canonical UTF-8 JSON payload for signing, with fields in the EXACT order
      * mandated by the T-008 DECISION log entry [2026-06-18 17:10]:
      *
@@ -265,18 +302,24 @@ class TripSigner @Inject constructor() {
      */
     private fun jsonEscapeString(input: String): String = buildString(input.length + 16) {
         for (character in input) {
-            when (character) {
-                '"' -> append("\\\"")
-                '\\' -> append("\\\\")
-                '\b' -> append("\\b")
-                '\u000C' -> append("\\f")
-                '\n' -> append("\\n")
-                '\r' -> append("\\r")
-                '\t' -> append("\\t")
+            when (val characterCode = character.code) {
+                // Match on the integer code point, NOT on control-character literals.
+                // A char literal for a control character can be silently rewritten into a raw,
+                // INVISIBLE control byte by file-writing tooling; that byte then corrupts the
+                // canonical payload with no visual trace and breaks signature verification
+                // undetectably (this bit us twice in escaping code). Hex codes stay plain ASCII
+                // that nothing can mangle. Do NOT convert these branches back to char literals.
+                0x22 -> append("\\\"") // double quote
+                0x5C -> append("\\\\") // backslash
+                0x08 -> append("\\b") // backspace
+                0x0C -> append("\\f") // form feed
+                0x0A -> append("\\n") // line feed
+                0x0D -> append("\\r") // carriage return
+                0x09 -> append("\\t") // tab
                 else ->
-                    if (character.code < 0x20) {
+                    if (characterCode < 0x20) {
                         append("\\u")
-                        append(character.code.toString(16).padStart(4, '0'))
+                        append(characterCode.toString(16).padStart(4, '0'))
                     } else {
                         append(character)
                     }

@@ -7,7 +7,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.mileagetracker.app.data.local.MileageTrackerDatabase
 import com.mileagetracker.app.data.local.TripEntity
 import com.mileagetracker.app.data.repository.TripRepositoryImpl
+import com.mileagetracker.app.data.signing.TripSigner
 import com.mileagetracker.app.domain.export.CsvExportRules
+import com.mileagetracker.app.domain.export.IntegritySidecarGenerator
 import com.mileagetracker.app.domain.model.PhotoRetentionMode
 import com.mileagetracker.app.domain.model.TripClassification
 import com.mileagetracker.app.domain.model.TripStatus
@@ -77,7 +79,12 @@ class CsvExportEndToEndTest {
             .build()
 
         tripRepositoryImpl = TripRepositoryImpl(inMemoryDatabase.tripDao())
-        csvFileWriter = CsvFileWriter(instrumentationContext)
+        val tripSigner = TripSigner()
+        csvFileWriter = CsvFileWriter(
+            appContext = instrumentationContext,
+            tripSigner = tripSigner,
+            integritySidecarGenerator = IntegritySidecarGenerator(tripSigner),
+        )
     }
 
     @After
@@ -201,9 +208,11 @@ class CsvExportEndToEndTest {
 
         val diskReadContent = outputCsvFile.readText(Charsets.UTF_8)
 
-        // Step 5: real CsvFileWriter.writeToDownloads() — asserts the MediaStore path
-        // does not crash and returns the correct filename pattern.
-        val writeToDownloadsResult = csvFileWriter.writeToDownloads(exportRows)
+        // Step 5: real CsvFileWriter.writeExport() — asserts the MediaStore path
+        // does not crash and returns the correct filename pattern. The emulator/device under
+        // test has no signing key provisioned, so the integrity sidecar is expected to fall
+        // back with a warning here — the CSV write itself must still succeed.
+        val writeExportResult = csvFileWriter.writeExport(completedDomainTrips, exportRows)
 
         // --- Assert: byte-level content from the disk-read file ---
 
@@ -321,16 +330,16 @@ class CsvExportEndToEndTest {
             commaReasonTripLine.contains("\"Visit client, sign contract\""),
         )
 
-        // Assertion 9: writeToDownloads() (MediaStore path) returns Success with the
+        // Assertion 9: writeExport() (MediaStore path) returns Success with the
         // correct filename pattern — proves it does not crash on this emulator/device.
         assertTrue(
-            "writeToDownloads() must return CsvWriteResult.Success; got: $writeToDownloadsResult",
-            writeToDownloadsResult is CsvWriteResult.Success,
+            "writeExport() must return ExportWriteResult.Success; got: $writeExportResult",
+            writeExportResult is ExportWriteResult.Success,
         )
-        val successWriteResult = writeToDownloadsResult as CsvWriteResult.Success
+        val successWriteResult = writeExportResult as ExportWriteResult.Success
         assertTrue(
-            "writeToDownloads() filename must match mileage_trips_YYYYMMDD_HHMMSS.csv",
-            successWriteResult.filename.matches(Regex("mileage_trips_\\d{8}_\\d{6}\\.csv")),
+            "writeExport() csvFilename must match mileage_trips_YYYYMMDD_HHMMSS.csv",
+            successWriteResult.csvFilename.matches(Regex("mileage_trips_\\d{8}_\\d{6}\\.csv")),
         )
     }
 

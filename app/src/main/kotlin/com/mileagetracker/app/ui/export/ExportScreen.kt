@@ -65,7 +65,16 @@ fun ExportScreen(
             }
 
             when (val result = uiState.lastExportResult) {
-                is ExportResult.Success -> Text("Exported ${result.rowCount} trips to ${result.filename}")
+                is ExportResult.Success -> {
+                    if (result.integrityWarning != null) {
+                        Text("Exported ${result.rowCount} trips to ${result.filename}")
+                        Text(result.integrityWarning, color = MaterialTheme.colorScheme.error)
+                    } else {
+                        Text(
+                            "Exported ${result.rowCount} trips + integrity file to ${result.filename}",
+                        )
+                    }
+                }
                 is ExportResult.Failure -> Text("Export failed: ${result.message}")
                 ExportResult.Idle -> Unit
             }
